@@ -1,2 +1,8 @@
-
+# macOS
 .DS_Store
+
+# Build artifacts
+dist/
+
+# Firmware submodule
+unleashed-firmware/
