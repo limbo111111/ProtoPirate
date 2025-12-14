@@ -474,46 +474,58 @@ void subghz_protocol_decoder_subaru_get_string(void *context, FuriString *output
 }
 
 static void subaru_encode_count(uint16_t count, uint32_t serial, uint8_t* b) {
-    // TODO: This is a placeholder implementation. A more robust implementation is needed.
-    // Reverse the decoding process to generate the encoded bytes
     uint8_t lo = count & 0xFF;
     uint8_t hi = (count >> 8) & 0xFF;
+
+    uint8_t SER0 = serial & 0xFF;
+    uint8_t SER1 = (serial >> 16) & 0xFF;
+    uint8_t SER2 = (serial >> 8) & 0xFF;
+
+    uint8_t total_rot = 4 + lo;
+    for (uint8_t i = 0; i < total_rot; i++) {
+        uint8_t t_bit = SER2 & 1;
+        SER2 = (SER2 >> 1) | (SER1 << 7);
+        SER1 = (SER1 >> 1) | (SER0 << 7);
+        SER0 = (SER0 >> 1) | (t_bit << 7);
+    }
+    b[1] = SER1;
+    b[2] = SER2;
+    b[3] = SER0;
+
+    uint8_t T1 = 0;
+    if (~hi & 0x40) T1 |= 0x01;
+    if (~hi & 0x80) T1 |= 0x02;
+    if (~hi & 0x04) T1 |= 0x10;
+    if (~hi & 0x08) T1 |= 0x20;
+
+    uint8_t T2 = 0;
+    if (~hi & 0x01) T2 |= 0x40;
+    if (~hi & 0x02) T2 |= 0x80;
+    if (~hi & 0x10) T2 |= 0x04;
+    if (~hi & 0x20) T2 |= 0x08;
+
+    uint8_t REG_SH1 = T1 ^ SER1;
+    uint8_t REG_SH2 = T2 ^ SER2;
+
+    b[7] = ((REG_SH1 & 0xF0) << 4) | ((REG_SH2 & 0xF0) >> 4);
+
+    b[6] = 0;
+    if (REG_SH1 & 0x01) b[6] |= 0x40;
+    if (REG_SH1 & 0x02) b[6] |= 0x80;
+    if (REG_SH2 & 0x0F) b[6] |= (REG_SH2 & 0x0F) << 2;
+
+    b[5] = 0;
+    if (REG_SH1 & 0x04) b[5] |= 0x04;
+    if (REG_SH1 & 0x08) b[5] |= 0x08;
+
+    if (~lo & 0x04) b[5] |= 0x01;
+    if (~lo & 0x08) b[5] |= 0x02;
+    if (~lo & 0x40) b[5] |= 0x40;
+    if (~lo & 0x80) b[5] |= 0x80;
 
     b[4] = 0;
     if (~lo & 0x01) b[4] |= 0x40;
     if (~lo & 0x02) b[4] |= 0x80;
-
-    if (~lo & 0x40) b[5] |= 0x40;
-    if (~lo & 0x80) b[5] |= 0x80;
-    if (~lo & 0x04) b[5] |= 0x01;
-    if (~lo & 0x08) b[5] |= 0x02;
-    if (~hi & 0x04) b[5] |= 0x10;
-    if (~hi & 0x08) b[5] |= 0x20;
-
-    b[6] = 0;
-    if (~lo & 0x10) b[6] |= 0x01;
-    if (~lo & 0x20) b[6] |= 0x02;
-    if (~hi & 0x01) b[6] |= 0x40;
-    if (~hi & 0x02) b[6] |= 0x80;
-
-    uint8_t REG_SH1 = 0;
-    if (~hi & 0x40) REG_SH1 |= 0x01;
-    if (~hi & 0x80) REG_SH1 |= 0x02;
-    if (b[5] & 0x10) REG_SH1 |= 0x04;
-    if (b[5] & 0x20) REG_SH1 |= 0x08;
-
-    uint8_t REG_SH2 = 0;
-    if (~hi & 0x10) REG_SH2 |= 0x04;
-    if (~hi & 0x20) REG_SH2 |= 0x08;
-
-    b[7] = 0;
-    b[7] |= (REG_SH1 & 0xF0) >> 4;
-    b[7] |= (REG_SH2 & 0x0F) << 4;
-
-    b[1] = (serial >> 16) & 0xFF;
-    b[2] = (serial >> 8) & 0xFF;
-    b[3] = serial & 0xFF;
-
 }
 
 SubGhzProtocolStatus
