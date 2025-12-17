@@ -1,2 +1,5 @@
-
 .DS_Store
+.vscode/
+build_output.log
+dist/debug/
+unleashed-firmware/

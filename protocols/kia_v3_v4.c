@@ -34,6 +34,7 @@ typedef struct SubGhzProtocolEncoderKiaV3V4
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
     uint8_t version;
+    uint16_t yield_state;
 } SubGhzProtocolEncoderKiaV3V4;
 
 typedef enum
@@ -414,8 +415,7 @@ void* kia_protocol_encoder_v3_v4_alloc(SubGhzEnvironment* environment) {
     SubGhzProtocolEncoderKiaV3V4* instance = malloc(sizeof(SubGhzProtocolEncoderKiaV3V4));
     instance->base.protocol = &kia_protocol_v3_v4;
     instance->generic.protocol_name = instance->base.protocol->name;
-    instance->encoder.encode_data = 0;
-    instance->encoder.encode_count_bit = 0;
+    instance->yield_state = 0;
     return instance;
 }
 
@@ -465,40 +465,45 @@ SubGhzProtocolStatus kia_protocol_encoder_v3_v4_deserialize(void* context, Flipp
         data = ~data;
     }
 
-    instance->encoder.encode_data = data;
-    instance->encoder.encode_count_bit = 64;
+    instance->generic.data = data;
+    instance->generic.data_count_bit = 64;
+    instance->yield_state = 0;
 
     return SubGhzProtocolStatusOk;
 }
 
-void kia_protocol_encoder_v3_v4_yield(void* context) {
+LevelDuration kia_protocol_encoder_v3_v4_yield(void* context) {
     furi_assert(context);
     SubGhzProtocolEncoderKiaV3V4* instance = context;
 
-    // Generate preamble
-    for (int i = 0; i < 8; i++) {
-        subghz_protocol_transmitter_yield(instance, true, 400);
-        subghz_protocol_transmitter_yield(instance, false, 400);
-    }
-
-    // Generate sync
-    if (instance->version == 1) { // V3
-        subghz_protocol_transmitter_yield(instance, true, 400);
-        subghz_protocol_transmitter_yield(instance, false, 1200);
-    } else { // V4
-        subghz_protocol_transmitter_yield(instance, true, 1200);
-        subghz_protocol_transmitter_yield(instance, false, 400);
-    }
-
-    // Generate data
-    for (uint8_t i = 0; i < 64; i++) {
-        if ((instance->encoder.encode_data >> i) & 1) {
-            subghz_protocol_transmitter_yield(instance, true, 800);
-            subghz_protocol_transmitter_yield(instance, false, 400);
-        } else {
-            subghz_protocol_transmitter_yield(instance, true, 400);
-            subghz_protocol_transmitter_yield(instance, false, 400);
+    if (instance->yield_state < 16) { // Preamble (8 pairs of high/low)
+        instance->yield_state++;
+        if ((instance->yield_state - 1) % 2 == 0) return level_duration_make(true, 400);
+        else return level_duration_make(false, 400);
+    } else if (instance->yield_state < 18) { // Sync (1 pair)
+        instance->yield_state++;
+        if (instance->version == 1) { // V3
+            if ((instance->yield_state - 1) == 16) return level_duration_make(true, 400);
+            else return level_duration_make(false, 1200);
+        } else { // V4
+            if ((instance->yield_state - 1) == 16) return level_duration_make(true, 1200);
+            else return level_duration_make(false, 400);
         }
+    } else if (instance->yield_state < 18 + 128) { // Data (64 bits * 2 pulses/bit)
+        uint8_t bit_index = (instance->yield_state - 18) / 2;
+        bool pulse_is_first = ((instance->yield_state - 18) % 2 == 0);
+        instance->yield_state++;
+
+        bool bit = (instance->generic.data >> bit_index) & 1;
+
+        if (pulse_is_first) {
+            if (bit) return level_duration_make(true, 800); // '1' bit
+            else return level_duration_make(true, 400); // '0' bit
+        } else {
+            return level_duration_make(false, 400);
+        }
+    } else { // Done
+        return level_duration_reset();
     }
 }
 

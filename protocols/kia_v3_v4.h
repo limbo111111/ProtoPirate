@@ -22,5 +22,7 @@ void kia_protocol_decoder_v3_v4_get_string(void* context, FuriString* output);
 void* kia_protocol_encoder_v3_v4_alloc(SubGhzEnvironment* environment);
 void kia_protocol_encoder_v3_v4_free(void* context);
 SubGhzProtocolStatus kia_protocol_encoder_v3_v4_deserialize(void* context, FlipperFormat* flipper_format);
-void kia_protocol_encoder_v3_v4_yield(void* context);
+#include <lib/subghz/types.h>
+
+LevelDuration kia_protocol_encoder_v3_v4_yield(void* context);
 void kia_protocol_encoder_v3_v4_stop(void* context);
