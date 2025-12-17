@@ -22,6 +22,10 @@ struct SubGhzProtocolEncoderKIA
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    uint32_t serial;
+    uint8_t button;
+    uint16_t counter;
     uint16_t yield_state;
 };
 
@@ -75,6 +79,9 @@ void* subghz_protocol_encoder_kia_alloc(SubGhzEnvironment* environment) {
     instance->base.protocol = &kia_protocol_v0;
     instance->generic.protocol_name = instance->base.protocol->name;
     instance->yield_state = 0;
+    instance->serial = 0;
+    instance->button = 0;
+    instance->counter = 0;
     return instance;
 }
 
@@ -84,16 +91,58 @@ void subghz_protocol_encoder_kia_free(void* context) {
     free(instance);
 }
 
+// Function to update the data with new button/counter values
+static void subghz_protocol_encoder_kia_update_data(SubGhzProtocolEncoderKIA* instance) {
+    // Reconstruct the 61-bit data with updated button and counter
+    uint64_t data = instance->generic.data;
+
+    // Clear and update button bits (8-11)
+    data &= ~(0x0FULL << 8);
+    data |= ((uint64_t)(instance->button & 0x0F) << 8);
+
+    // Clear and update counter bits (40-55)
+    data &= ~(0xFFFFULL << 40);
+    data |= ((uint64_t)(instance->counter & 0xFFFF) << 40);
+
+    instance->generic.data = data;
+
+    // Reset transmission state for new data
+    instance->yield_state = 0;
+}
+
 SubGhzProtocolStatus subghz_protocol_encoder_kia_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolEncoderKIA* instance = context;
+
     SubGhzProtocolStatus result = subghz_block_generic_deserialize_check_count_bit(
         &instance->generic, flipper_format, subghz_protocol_kia_const.min_count_bit_for_found);
-    
+
     if (result == SubGhzProtocolStatusOk) {
-        instance->yield_state = 0;
+        // Read or extract serial
+        if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1)) {
+            instance->serial = (uint32_t)((instance->generic.data >> 12) & 0x0FFFFFFF);
+        }
+
+        // Read or extract button
+        uint32_t btn_temp;
+        if (flipper_format_read_uint32(flipper_format, "Btn", &btn_temp, 1)) {
+            instance->button = (uint8_t)btn_temp;
+        } else {
+            instance->button = (instance->generic.data >> 8) & 0x0F;
+        }
+
+        // Read or extract counter
+        uint32_t cnt_temp;
+        if (flipper_format_read_uint32(flipper_format, "Cnt", &cnt_temp, 1)) {
+            instance->counter = (uint16_t)cnt_temp;
+        } else {
+            instance->counter = (instance->generic.data >> 40) & 0xFFFF;
+        }
+
+        // Update the key data with button and counter values
+        subghz_protocol_encoder_kia_update_data(instance);
     }
-    
+
     return result;
 }
 
@@ -144,6 +193,19 @@ LevelDuration subghz_protocol_encoder_kia_yield(void* context) {
     } else { // Done
         return level_duration_reset();
     }
+}
+
+// Allow button/counter updates
+void subghz_protocol_encoder_kia_set_button(void* context, uint8_t button) {
+    SubGhzProtocolEncoderKIA* instance = context;
+    instance->button = button & 0x0F;
+    subghz_protocol_encoder_kia_update_data(instance);
+}
+
+void subghz_protocol_encoder_kia_set_counter(void* context, uint16_t counter) {
+    SubGhzProtocolEncoderKIA* instance = context;
+    instance->counter = counter;
+    subghz_protocol_encoder_kia_update_data(instance);
 }
 
 // Decoder implementation
