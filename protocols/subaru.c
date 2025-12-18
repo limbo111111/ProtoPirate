@@ -80,6 +80,26 @@ const SubGhzProtocolEncoder subghz_protocol_subaru_encoder = {
     .yield = subghz_protocol_encoder_subaru_yield,
 };
 
+// Bit masks for decoding/encoding the 'lo' byte of the count
+#define SUBARU_LO_B4_6 (1 << 0)
+#define SUBARU_LO_B4_7 (1 << 1)
+#define SUBARU_LO_B5_0 (1 << 2)
+#define SUBARU_LO_B5_1 (1 << 3)
+#define SUBARU_LO_B6_0 (1 << 4)
+#define SUBARU_LO_B6_1 (1 << 5)
+#define SUBARU_LO_B5_6 (1 << 6)
+#define SUBARU_LO_B5_7 (1 << 7)
+
+// Bit masks for decoding/encoding the 'hi' byte of the count
+#define SUBARU_HI_T1_4 (1 << 2)
+#define SUBARU_HI_T1_5 (1 << 3)
+#define SUBARU_HI_T2_7 (1 << 1)
+#define SUBARU_HI_T2_6 (1 << 0)
+#define SUBARU_HI_T1_0 (1 << 6)
+#define SUBARU_HI_T1_1 (1 << 7)
+#define SUBARU_HI_T2_3 (1 << 5)
+#define SUBARU_HI_T2_2 (1 << 4)
+
 const SubGhzProtocol subaru_protocol = {
     .name = SUBARU_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
@@ -88,35 +108,22 @@ const SubGhzProtocol subaru_protocol = {
     .encoder = &subghz_protocol_subaru_encoder,
 };
 
-static void subaru_decode_count(const uint8_t *KB, uint16_t *count)
-{
+static void subaru_decode_count(const uint8_t* KB, uint16_t* count) {
     uint8_t lo = 0;
-    if ((KB[4] & 0x40) == 0)
-        lo |= 0x01;
-    if ((KB[4] & 0x80) == 0)
-        lo |= 0x02;
-    if ((KB[5] & 0x01) == 0)
-        lo |= 0x04;
-    if ((KB[5] & 0x02) == 0)
-        lo |= 0x08;
-    if ((KB[6] & 0x01) == 0)
-        lo |= 0x10;
-    if ((KB[6] & 0x02) == 0)
-        lo |= 0x20;
-    if ((KB[5] & 0x40) == 0)
-        lo |= 0x40;
-    if ((KB[5] & 0x80) == 0)
-        lo |= 0x80;
+    if((KB[4] & 0x40) == 0) lo |= SUBARU_LO_B4_6;
+    if((KB[4] & 0x80) == 0) lo |= SUBARU_LO_B4_7;
+    if((KB[5] & 0x01) == 0) lo |= SUBARU_LO_B5_0;
+    if((KB[5] & 0x02) == 0) lo |= SUBARU_LO_B5_1;
+    if((KB[6] & 0x01) == 0) lo |= SUBARU_LO_B6_0;
+    if((KB[6] & 0x02) == 0) lo |= SUBARU_LO_B6_1;
+    if((KB[5] & 0x40) == 0) lo |= SUBARU_LO_B5_6;
+    if((KB[5] & 0x80) == 0) lo |= SUBARU_LO_B5_7;
 
     uint8_t REG_SH1 = (KB[7] << 4) & 0xF0;
-    if (KB[5] & 0x04)
-        REG_SH1 |= 0x04;
-    if (KB[5] & 0x08)
-        REG_SH1 |= 0x08;
-    if (KB[6] & 0x80)
-        REG_SH1 |= 0x02;
-    if (KB[6] & 0x40)
-        REG_SH1 |= 0x01;
+    if(KB[5] & 0x04) REG_SH1 |= 0x04;
+    if(KB[5] & 0x08) REG_SH1 |= 0x08;
+    if(KB[6] & 0x80) REG_SH1 |= 0x02;
+    if(KB[6] & 0x40) REG_SH1 |= 0x01;
 
     uint8_t REG_SH2 = ((KB[6] << 2) & 0xF0) | ((KB[7] >> 4) & 0x0F);
 
@@ -125,8 +132,7 @@ static void subaru_decode_count(const uint8_t *KB, uint16_t *count)
     uint8_t SER2 = KB[2];
 
     uint8_t total_rot = 4 + lo;
-    for (uint8_t i = 0; i < total_rot; ++i)
-    {
+    for(uint8_t i = 0; i < total_rot; ++i) {
         uint8_t t_bit = (SER0 >> 7) & 1;
         SER0 = ((SER0 << 1) & 0xFE) | ((SER1 >> 7) & 1);
         SER1 = ((SER1 << 1) & 0xFE) | ((SER2 >> 7) & 1);
@@ -137,22 +143,14 @@ static void subaru_decode_count(const uint8_t *KB, uint16_t *count)
     uint8_t T2 = SER2 ^ REG_SH2;
 
     uint8_t hi = 0;
-    if ((T1 & 0x10) == 0)
-        hi |= 0x04;
-    if ((T1 & 0x20) == 0)
-        hi |= 0x08;
-    if ((T2 & 0x80) == 0)
-        hi |= 0x02;
-    if ((T2 & 0x40) == 0)
-        hi |= 0x01;
-    if ((T1 & 0x01) == 0)
-        hi |= 0x40;
-    if ((T1 & 0x02) == 0)
-        hi |= 0x80;
-    if ((T2 & 0x08) == 0)
-        hi |= 0x20;
-    if ((T2 & 0x04) == 0)
-        hi |= 0x10;
+    if((T1 & 0x10) == 0) hi |= SUBARU_HI_T1_4;
+    if((T1 & 0x20) == 0) hi |= SUBARU_HI_T1_5;
+    if((T2 & 0x80) == 0) hi |= SUBARU_HI_T2_7;
+    if((T2 & 0x40) == 0) hi |= SUBARU_HI_T2_6;
+    if((T1 & 0x01) == 0) hi |= SUBARU_HI_T1_0;
+    if((T1 & 0x02) == 0) hi |= SUBARU_HI_T1_1;
+    if((T2 & 0x08) == 0) hi |= SUBARU_HI_T2_3;
+    if((T2 & 0x04) == 0) hi |= SUBARU_HI_T2_2;
 
     *count = ((hi << 8) | lo) & 0xFFFF;
 }
@@ -502,14 +500,14 @@ static void subaru_encode_count(uint32_t serial, uint16_t count, uint8_t* key_by
     }
 
     uint8_t T1 = 0, T2 = 0;
-    if (!((hi >> 2) & 1)) T1 |= 0x10;
-    if (!((hi >> 3) & 1)) T1 |= 0x20;
-    if (!((hi >> 1) & 1)) T2 |= 0x80;
-    if (!((hi >> 0) & 1)) T2 |= 0x40;
-    if (!((hi >> 6) & 1)) T1 |= 0x01;
-    if (!((hi >> 7) & 1)) T1 |= 0x02;
-    if (!((hi >> 5) & 1)) T2 |= 0x08;
-    if (!((hi >> 4) & 1)) T2 |= 0x04;
+    if (!(hi & SUBARU_HI_T1_4)) T1 |= 0x10;
+    if (!(hi & SUBARU_HI_T1_5)) T1 |= 0x20;
+    if (!(hi & SUBARU_HI_T2_7)) T2 |= 0x80;
+    if (!(hi & SUBARU_HI_T2_6)) T2 |= 0x40;
+    if (!(hi & SUBARU_HI_T1_0)) T1 |= 0x01;
+    if (!(hi & SUBARU_HI_T1_1)) T1 |= 0x02;
+    if (!(hi & SUBARU_HI_T2_3)) T2 |= 0x08;
+    if (!(hi & SUBARU_HI_T2_2)) T2 |= 0x04;
 
     uint8_t REG_SH1 = T1 ^ SER1;
     uint8_t REG_SH2 = T2 ^ SER2;
@@ -525,14 +523,14 @@ static void subaru_encode_count(uint32_t serial, uint16_t count, uint8_t* key_by
     key_bytes[6] |= (REG_SH2 & 0xF0) >> 2;
 
     key_bytes[4] = 0;
-    if (!(lo & 0x01)) key_bytes[4] |= 0x40;
-    if (!(lo & 0x02)) key_bytes[4] |= 0x80;
-    if (!(lo & 0x04)) key_bytes[5] |= 0x01;
-    if (!(lo & 0x08)) key_bytes[5] |= 0x02;
-    if (!(lo & 0x10)) key_bytes[6] |= 0x01;
-    if (!(lo & 0x20)) key_bytes[6] |= 0x02;
-    if (!(lo & 0x40)) key_bytes[5] |= 0x40;
-    if (!(lo & 0x80)) key_bytes[5] |= 0x80;
+    if (!(lo & SUBARU_LO_B4_6)) key_bytes[4] |= 0x40;
+    if (!(lo & SUBARU_LO_B4_7)) key_bytes[4] |= 0x80;
+    if (!(lo & SUBARU_LO_B5_0)) key_bytes[5] |= 0x01;
+    if (!(lo & SUBARU_LO_B5_1)) key_bytes[5] |= 0x02;
+    if (!(lo & SUBARU_LO_B6_0)) key_bytes[6] |= 0x01;
+    if (!(lo & SUBARU_LO_B6_1)) key_bytes[6] |= 0x02;
+    if (!(lo & SUBARU_LO_B5_6)) key_bytes[5] |= 0x40;
+    if (!(lo & SUBARU_LO_B5_7)) key_bytes[5] |= 0x80;
 }
 
 static void subghz_protocol_encoder_subaru_update_data(SubGhzProtocolEncoderSubaru* instance) {

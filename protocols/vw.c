@@ -428,31 +428,6 @@ SubGhzProtocolStatus subghz_protocol_decoder_vw_deserialize(void *context, Flipp
         &instance->generic, flipper_format, subghz_protocol_vw_const.min_count_bit_for_found);
 }
 
-static const char *vw_get_button_name(uint8_t btn)
-{
-    switch (btn)
-    {
-    case 0x1:
-        return "UNLOCK";
-    case 0x2:
-        return "LOCK";
-    case 0x3:
-        return "Un+Lk";
-    case 0x4:
-        return "TRUNK";
-    case 0x5:
-        return "Un+Tr";
-    case 0x6:
-        return "Lk+Tr";
-    case 0x7:
-        return "Un+Lk+Tr";
-    case 0x8:
-        return "PANIC";
-    default:
-        return "Unknown";
-    }
-}
-
 void subghz_protocol_decoder_vw_get_string(void *context, FuriString *output)
 {
     furi_assert(context);
@@ -461,6 +436,38 @@ void subghz_protocol_decoder_vw_get_string(void *context, FuriString *output)
     uint8_t type = (instance->data_2 >> 8) & 0xFF;
     uint8_t check = instance->data_2 & 0xFF;
     uint8_t btn = (check >> 4) & 0xF;
+
+    const char* btn_name;
+    switch (btn)
+    {
+    case 0x1:
+        btn_name = "UNLOCK";
+        break;
+    case 0x2:
+        btn_name = "LOCK";
+        break;
+    case 0x3:
+        btn_name = "Un+Lk";
+        break;
+    case 0x4:
+        btn_name = "TRUNK";
+        break;
+    case 0x5:
+        btn_name = "Un+Tr";
+        break;
+    case 0x6:
+        btn_name = "Lk+Tr";
+        break;
+    case 0x7:
+        btn_name = "Un+Lk+Tr";
+        break;
+    case 0x8:
+        btn_name = "PANIC";
+        break;
+    default:
+        btn_name = "Unknown";
+        break;
+    }
 
     uint32_t key_high = (instance->generic.data >> 32) & 0xFFFFFFFF;
     uint32_t key_low = instance->generic.data & 0xFFFFFFFF;
@@ -478,7 +485,7 @@ void subghz_protocol_decoder_vw_get_string(void *context, FuriString *output)
         check,
         type,
         btn,
-        vw_get_button_name(btn));
+        btn_name);
 }
 
 // Encoder implementation

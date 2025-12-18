@@ -42,8 +42,8 @@ typedef struct SubGhzProtocolEncoderFordV0
     uint32_t serial;
     uint8_t button;
     uint32_t count;
-    uint8_t bs;
-    uint8_t crc;
+    uint8_t byte_select;
+    uint8_t checksum;
 
     uint16_t yield_state;
     uint64_t data[2]; // 80 bits total
@@ -64,7 +64,7 @@ void subghz_protocol_encoder_ford_v0_free(void* context);
 SubGhzProtocolStatus subghz_protocol_encoder_ford_v0_deserialize(void* context, FlipperFormat* flipper_format);
 void subghz_protocol_encoder_ford_v0_stop(void* context);
 LevelDuration subghz_protocol_encoder_ford_v0_yield(void* context);
-static void encode_ford_v0(uint32_t serial, uint8_t button, uint32_t count, uint8_t bs, uint8_t crc, uint64_t* key1, uint16_t* key2);
+static void encode_ford_v0(uint32_t serial, uint8_t button, uint32_t count, uint8_t byte_select, uint8_t checksum, uint64_t* key1, uint16_t* key2);
 
 
 // Forward declarations
@@ -431,6 +431,9 @@ void subghz_protocol_decoder_ford_v0_get_string(void *context, FuriString *outpu
         instance->key2 & 0xFF);
 }
 
+#define FORD_V0_NIBBLE_MASK 0xAA
+#define FORD_V0_NIBBLE_MASK_INV 0x55
+
 // Encoder implementation
 void* subghz_protocol_encoder_ford_v0_alloc(SubGhzEnvironment* environment) {
     UNUSED(environment);
@@ -441,8 +444,8 @@ void* subghz_protocol_encoder_ford_v0_alloc(SubGhzEnvironment* environment) {
     instance->serial = 0;
     instance->button = 0;
     instance->count = 0;
-    instance->bs = 0;
-    instance->crc = 0;
+    instance->byte_select = 0;
+    instance->checksum = 0;
     return instance;
 }
 
@@ -452,7 +455,7 @@ void subghz_protocol_encoder_ford_v0_free(void* context) {
     free(instance);
 }
 
-static void encode_ford_v0(uint32_t serial, uint8_t button, uint32_t count, uint8_t bs, uint8_t crc, uint64_t* key1, uint16_t* key2) {
+static void encode_ford_v0(uint32_t serial, uint8_t button, uint32_t count, uint8_t byte_select, uint8_t checksum, uint64_t* key1, uint16_t* key2) {
     uint8_t buf[13] = {0};
 
     // Pack serial, button, count into buffer
@@ -467,14 +470,14 @@ static void encode_ford_v0(uint32_t serial, uint8_t button, uint32_t count, uint
     buf[7] = count & 0xFF;
 
     // Reverse the mixing of buf[6] and buf[7]
-    uint8_t orig_b7 = (buf[7] & 0xAA) | (buf[6] & 0x55);
-    uint8_t mixed = (buf[6] & 0xAA) | (buf[7] & 0x55);
+    uint8_t orig_b7 = (buf[7] & FORD_V0_NIBBLE_MASK) | (buf[6] & FORD_V0_NIBBLE_MASK_INV);
+    uint8_t mixed = (buf[6] & FORD_V0_NIBBLE_MASK) | (buf[7] & FORD_V0_NIBBLE_MASK_INV);
     buf[6] = mixed;
     buf[7] = orig_b7;
 
 
     // Determine xor_byte and limit
-    uint8_t tmp = bs;
+    uint8_t tmp = byte_select;
     uint8_t parity = 0;
     uint8_t parity_any = (tmp != 0);
     while (tmp) {
@@ -508,7 +511,7 @@ static void encode_ford_v0(uint32_t serial, uint8_t button, uint32_t count, uint
         *key1 |= ((uint64_t)buf[i] << (56 - i * 8));
     }
 
-    *key2 = ((uint16_t)bs << 8) | crc;
+    *key2 = ((uint16_t)byte_select << 8) | checksum;
 }
 
 
@@ -516,7 +519,7 @@ static void subghz_protocol_encoder_ford_v0_update_data(SubGhzProtocolEncoderFor
     uint64_t key1;
     uint16_t key2;
 
-    encode_ford_v0(instance->serial, instance->button, instance->count, instance->bs, instance->crc, &key1, &key2);
+    encode_ford_v0(instance->serial, instance->button, instance->count, instance->byte_select, instance->checksum, &key1, &key2);
 
     // Invert and combine into a single 80-bit stream
     uint64_t inverted_key1 = ~key1;
@@ -540,16 +543,16 @@ SubGhzProtocolStatus subghz_protocol_encoder_ford_v0_deserialize(void* context, 
     if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1) ||
         !flipper_format_read_uint32(flipper_format, "Btn", (uint32_t*)&instance->button, 1) ||
         !flipper_format_read_uint32(flipper_format, "Cnt", &instance->count, 1) ||
-        !flipper_format_read_uint32(flipper_format, "BS", (uint32_t*)&instance->bs, 1) ||
-        !flipper_format_read_uint32(flipper_format, "CRC", (uint32_t*)&instance->crc, 1)) {
+        !flipper_format_read_uint32(flipper_format, "BS", (uint32_t*)&instance->byte_select, 1) ||
+        !flipper_format_read_uint32(flipper_format, "CRC", (uint32_t*)&instance->checksum, 1)) {
 
         // Fallback to decoding from raw key if fields are missing
         uint64_t key1 = instance->generic.data;
         uint16_t key2 = 0; // Can't get this from just generic.data
         decode_ford_v0(key1, key2, &instance->serial, &instance->button, &instance->count);
         // BS and CRC cannot be recovered from key1 alone
-        instance->bs = 0;
-        instance->crc = 0;
+        instance->byte_select = 0;
+        instance->checksum = 0;
     }
 
     subghz_protocol_encoder_ford_v0_update_data(instance);
@@ -592,23 +595,14 @@ LevelDuration subghz_protocol_encoder_ford_v0_yield(void* context) {
         bool pulse_is_first = ((instance->yield_state - 52) % 2 == 0);
         instance->yield_state++;
 
-        bool bit;
-        if (bit_index < 64) {
-            bit = (instance->data[0] >> (63 - bit_index)) & 1;
-        } else {
-            bit = (instance->data[1] >> (79 - bit_index)) & 1;
-        }
+        bool bit = (bit_index < 64) ?
+                   ((instance->data[0] >> (63 - bit_index)) & 1) :
+                   ((instance->data[1] >> (79 - bit_index)) & 1);
 
         // Manchester: 0 -> high-low, 1 -> low-high
-        // The decoder seems to use a slightly different manchester. Let's send what the decoder expects.
-        // based on `manchester_advance` and `feed`
-        // 0 -> short high, short low
-        // 1 -> short low, short high
-        if(pulse_is_first) {
-            return level_duration_make(!bit, subghz_protocol_ford_v0_const.te_short);
-        } else {
-            return level_duration_make(bit, subghz_protocol_ford_v0_const.te_short);
-        }
+        // Decoder expects: 0 -> short high/low, 1 -> short low/high
+        bool level = pulse_is_first ? !bit : bit;
+        return level_duration_make(level, subghz_protocol_ford_v0_const.te_short);
     }
     else { // Done
         return level_duration_reset();

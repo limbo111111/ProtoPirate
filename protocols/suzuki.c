@@ -277,23 +277,6 @@ SubGhzProtocolStatus subghz_protocol_decoder_suzuki_deserialize(void *context, F
     return subghz_block_generic_deserialize(&instance->generic, flipper_format);
 }
 
-static const char *suzuki_get_button_name(uint8_t btn)
-{
-    switch (btn)
-    {
-    case 1:
-        return "PANIC";
-    case 2:
-        return "TRUNK";
-    case 3:
-        return "LOCK";
-    case 4:
-        return "UNLOCK";
-    default:
-        return "Unknown";
-    }
-}
-
 void subghz_protocol_decoder_suzuki_get_string(void *context, FuriString *output)
 {
     furi_assert(context);
@@ -303,6 +286,26 @@ void subghz_protocol_decoder_suzuki_get_string(void *context, FuriString *output
     uint32_t key_high = (data >> 32) & 0xFFFFFFFF;
     uint32_t key_low = data & 0xFFFFFFFF;
     uint8_t crc = (data >> 4) & 0xFF;
+
+    const char* btn_name;
+    switch (instance->generic.btn)
+    {
+    case 1:
+        btn_name = "PANIC";
+        break;
+    case 2:
+        btn_name = "TRUNK";
+        break;
+    case 3:
+        btn_name = "LOCK";
+        break;
+    case 4:
+        btn_name = "UNLOCK";
+        break;
+    default:
+        btn_name = "Unknown";
+        break;
+    }
 
     furi_string_cat_printf(
         output,
@@ -316,7 +319,7 @@ void subghz_protocol_decoder_suzuki_get_string(void *context, FuriString *output
         key_low,
         instance->generic.serial,
         instance->generic.btn,
-        suzuki_get_button_name(instance->generic.btn),
+        btn_name,
         instance->generic.cnt,
         crc);
 }
