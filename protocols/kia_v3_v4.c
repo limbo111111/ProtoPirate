@@ -28,13 +28,22 @@ typedef struct SubGhzProtocolDecoderKiaV3V4
     uint8_t version; // 0 = V4, 1 = V3
 } SubGhzProtocolDecoderKiaV3V4;
 
+#include <furi.h>
+
 typedef struct SubGhzProtocolEncoderKiaV3V4
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
-    uint8_t version;
+
+    // Encoder state
+    uint32_t serial;
+    uint8_t button;
+    uint16_t count;
+    uint8_t version; // 0 = V4, 1 = V3
+
     uint16_t yield_state;
+    uint64_t data;
 } SubGhzProtocolEncoderKiaV3V4;
 
 typedef enum
@@ -425,6 +434,36 @@ void kia_protocol_encoder_v3_v4_free(void* context) {
     free(instance);
 }
 
+static void subghz_protocol_encoder_kia_v3_v4_update_data(SubGhzProtocolEncoderKiaV3V4* instance) {
+    uint32_t decrypted = (instance->button << 28) |
+                         ((instance->serial & 0xFF) << 16) |
+                         instance->count;
+
+    uint32_t encrypted = keeloq_common_encrypt(decrypted, kia_mf_key);
+
+    uint8_t b[8];
+    b[0] = reverse8((uint8_t)(encrypted & 0xFF));
+    b[1] = reverse8((uint8_t)((encrypted >> 8) & 0xFF));
+    b[2] = reverse8((uint8_t)((encrypted >> 16) & 0xFF));
+    b[3] = reverse8((uint8_t)((encrypted >> 24) & 0xFF));
+    b[4] = reverse8((uint8_t)(instance->serial & 0xFF));
+    b[5] = reverse8((uint8_t)((instance->serial >> 8) & 0xFF));
+    b[6] = reverse8((uint8_t)((instance->serial >> 16) & 0xFF));
+    b[7] = reverse8(((uint8_t)((instance->serial >> 24) & 0xFF) & 0x0F) | (instance->button << 4));
+
+    uint64_t data = 0;
+    for (int i = 0; i < 8; i++) {
+        data |= (uint64_t)b[i] << (i * 8);
+    }
+
+    if (instance->version == 1) { // V3
+        data = ~data;
+    }
+
+    instance->data = data;
+    instance->yield_state = 0;
+}
+
 SubGhzProtocolStatus kia_protocol_encoder_v3_v4_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolEncoderKiaV3V4* instance = context;
@@ -433,41 +472,12 @@ SubGhzProtocolStatus kia_protocol_encoder_v3_v4_deserialize(void* context, Flipp
         return SubGhzProtocolStatusError;
     }
 
-    // Read the version, defaulting to V4 if not present
-    uint32_t version = 0;
-    flipper_format_read_uint32(flipper_format, "Version", &version, 1);
-    instance->version = version;
+    flipper_format_read_uint32(flipper_format, "Version", (uint32_t*)&instance->version, 1);
+    instance->serial = instance->generic.serial;
+    instance->button = instance->generic.btn;
+    instance->count = instance->generic.cnt;
 
-    // Reconstruct the decrypted data from the saved fields
-    uint32_t decrypted = (instance->generic.btn << 28) |
-                         (((instance->generic.serial >> 24) & 0xFF) << 16) |
-                         instance->generic.cnt;
-
-    // Encrypt the data to get the payload
-    uint32_t encrypted = keeloq_common_encrypt(decrypted, kia_mf_key);
-
-    // Build the 64-bit data packet
-    uint64_t data = 0;
-    uint8_t* b = (uint8_t*)&data;
-
-    b[0] = (uint8_t)(encrypted & 0xFF);
-    b[1] = (uint8_t)((encrypted >> 8) & 0xFF);
-    b[2] = (uint8_t)((encrypted >> 16) & 0xFF);
-    b[3] = (uint8_t)((encrypted >> 24) & 0xFF);
-    uint32_t serial_to_encode = instance->generic.serial;
-    b[4] = (uint8_t)(serial_to_encode & 0xFF);
-    b[5] = (uint8_t)((serial_to_encode >> 8) & 0xFF);
-    b[6] = (uint8_t)((serial_to_encode >> 16) & 0xFF);
-    b[7] = ((uint8_t)((serial_to_encode >> 24) & 0xFF) & 0x0F) | (instance->generic.btn << 4);
-
-    // For V3, the data is inverted
-    if (instance->version == 3) {
-        data = ~data;
-    }
-
-    instance->generic.data = data;
-    instance->generic.data_count_bit = 64;
-    instance->yield_state = 0;
+    subghz_protocol_encoder_kia_v3_v4_update_data(instance);
 
     return SubGhzProtocolStatusOk;
 }
@@ -476,38 +486,37 @@ LevelDuration kia_protocol_encoder_v3_v4_yield(void* context) {
     furi_assert(context);
     SubGhzProtocolEncoderKiaV3V4* instance = context;
 
-    if (instance->yield_state < 16) { // Preamble (8 pairs of high/low)
+    if (instance->yield_state < 16) { // Preamble
         instance->yield_state++;
-        if ((instance->yield_state - 1) % 2 == 0) return level_duration_make(true, 400);
-        else return level_duration_make(false, 400);
-    } else if (instance->yield_state < 18) { // Sync (1 pair)
+        return level_duration_make((instance->yield_state -1) % 2 == 0, 400);
+    } else if (instance->yield_state < 18) { // Sync
         instance->yield_state++;
         if (instance->version == 1) { // V3
-            if ((instance->yield_state - 1) == 16) return level_duration_make(true, 400);
-            else return level_duration_make(false, 1200);
+            return level_duration_make((instance->yield_state - 1) == 16, (instance->yield_state - 1) == 16 ? 400 : 1200);
         } else { // V4
-            if ((instance->yield_state - 1) == 16) return level_duration_make(true, 1200);
-            else return level_duration_make(false, 400);
+            return level_duration_make((instance->yield_state - 1) == 16, (instance->yield_state - 1) == 16 ? 1200 : 400);
         }
-    } else if (instance->yield_state < 18 + 128) { // Data (64 bits * 2 pulses/bit)
-        uint8_t bit_index = (instance->yield_state - 18) / 2;
-        bool pulse_is_first = ((instance->yield_state - 18) % 2 == 0);
+    } else if (instance->yield_state < 18 + 64) { // Data
+        uint8_t bit_index = instance->yield_state - 18;
         instance->yield_state++;
 
-        bool bit = (instance->generic.data >> bit_index) & 1;
+        bool bit = (instance->data >> (63-bit_index)) & 1;
 
-        if (pulse_is_first) {
-            if (bit) return level_duration_make(true, 800); // '1' bit
-            else return level_duration_make(true, 400); // '0' bit
-        } else {
-            return level_duration_make(false, 400);
-        }
-    } else { // Done
+        if (bit) return level_duration_make(true, 800); // '1' bit
+        else return level_duration_make(true, 400); // '0' bit
+
+    } else if (instance->yield_state < 18 + 64 + 64) { // Low pulses after each data bit
+         instance->yield_state++;
+         return level_duration_make(false, 400);
+    }
+
+    else { // Done
         return level_duration_reset();
     }
 }
 
 void kia_protocol_encoder_v3_v4_stop(void* context) {
     furi_assert(context);
-    UNUSED(context);
+    SubGhzProtocolEncoderKiaV3V4* instance = context;
+    instance->yield_state = 0;
 }

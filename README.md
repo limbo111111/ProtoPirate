@@ -21,10 +21,15 @@ Decoders:
 
 Encoders:
 - KIA V0
+- KIA V1
+- KIA V2
+- KIA V3 / V4
 - Ford V0
 - Subaru
 - Suzuki
 - Volkswagen (VW)
+- BMW
+- Fiat V0
   
 ---
 

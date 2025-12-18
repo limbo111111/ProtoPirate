@@ -20,11 +20,22 @@ struct SubGhzProtocolDecoderKiaV2
     uint16_t raw_bit_count;
 };
 
+#include <furi.h>
+
 struct SubGhzProtocolEncoderKiaV2
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    // Encoder state
+    uint32_t serial;
+    uint8_t button;
+    uint16_t count;
+    uint8_t crc;
+
+    uint16_t yield_state;
+    uint64_t data;
 };
 
 typedef enum
@@ -33,6 +44,14 @@ typedef enum
     KiaV2DecoderStepCheckPreamble,
     KiaV2DecoderStepCollectRawBits,
 } KiaV2DecoderStep;
+
+// Forward declarations for encoder
+void* subghz_protocol_encoder_kia_v2_alloc(SubGhzEnvironment* environment);
+void subghz_protocol_encoder_kia_v2_free(void* context);
+SubGhzProtocolStatus subghz_protocol_encoder_kia_v2_deserialize(void* context, FlipperFormat* flipper_format);
+void subghz_protocol_encoder_kia_v2_stop(void* context);
+LevelDuration subghz_protocol_encoder_kia_v2_yield(void* context);
+
 
 const SubGhzProtocolDecoder kia_protocol_v2_decoder = {
     .alloc = kia_protocol_decoder_v2_alloc,
@@ -46,18 +65,18 @@ const SubGhzProtocolDecoder kia_protocol_v2_decoder = {
 };
 
 const SubGhzProtocolEncoder kia_protocol_v2_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_kia_v2_alloc,
+    .free = subghz_protocol_encoder_kia_v2_free,
+    .deserialize = subghz_protocol_encoder_kia_v2_deserialize,
+    .stop = subghz_protocol_encoder_kia_v2_stop,
+    .yield = subghz_protocol_encoder_kia_v2_yield,
 };
 
 const SubGhzProtocol kia_protocol_v2 = {
     .name = KIA_PROTOCOL_V2_NAME,
     .type = SubGhzProtocolTypeDynamic,
     .flag = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_FM |
-            SubGhzProtocolFlag_Decodable,
+            SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &kia_protocol_v2_decoder,
     .encoder = &kia_protocol_v2_encoder,
 };
@@ -348,4 +367,121 @@ void kia_protocol_decoder_v2_get_string(void *context, FuriString *output)
         instance->generic.btn,
         instance->generic.cnt,
         crc);
+}
+
+// Encoder implementation
+void* subghz_protocol_encoder_kia_v2_alloc(SubGhzEnvironment* environment) {
+    UNUSED(environment);
+    SubGhzProtocolEncoderKiaV2* instance = malloc(sizeof(SubGhzProtocolEncoderKiaV2));
+    instance->base.protocol = &kia_protocol_v2;
+    instance->generic.protocol_name = instance->base.protocol->name;
+    instance->yield_state = 0;
+    instance->serial = 0;
+    instance->button = 0;
+    instance->count = 0;
+    instance->crc = 0;
+    return instance;
+}
+
+void subghz_protocol_encoder_kia_v2_free(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV2* instance = context;
+    free(instance);
+}
+
+static void subghz_protocol_encoder_kia_v2_update_data(SubGhzProtocolEncoderKiaV2* instance) {
+    uint64_t data = 0;
+    data |= (uint64_t)instance->serial << 20;
+    data |= (uint64_t)instance->button << 16;
+
+    // Reverse the count transformation
+    uint16_t raw_count = ((instance->count & 0xFF) << 4) | ((instance->count >> 8) & 0x0F);
+    data |= (uint64_t)raw_count << 4;
+
+    data |= (uint64_t)instance->crc;
+
+    instance->data = data;
+    instance->yield_state = 0;
+}
+
+SubGhzProtocolStatus subghz_protocol_encoder_kia_v2_deserialize(void* context, FlipperFormat* flipper_format) {
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV2* instance = context;
+
+    if (subghz_block_generic_deserialize(&instance->generic, flipper_format) != SubGhzProtocolStatusOk) {
+        return SubGhzProtocolStatusError;
+    }
+
+    uint32_t serial, btn, cnt, crc, raw_cnt;
+    if (!flipper_format_read_uint32(flipper_format, "Serial", &serial, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Btn", &btn, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Cnt", &cnt, 1) ||
+        !flipper_format_read_uint32(flipper_format, "CRC", &crc, 1) ||
+        !flipper_format_read_uint32(flipper_format, "RawCnt", &raw_cnt, 1)) {
+
+        // Fallback for older captures
+        instance->serial = (uint32_t)((instance->generic.data >> 20) & 0xFFFFFFFF);
+        instance->button = (uint8_t)((instance->generic.data >> 16) & 0x0F);
+        uint16_t raw_count = (uint16_t)((instance->generic.data >> 4) & 0xFFF);
+        instance->count = ((raw_count >> 4) | (raw_count << 8)) & 0xFFF;
+        instance->crc = (uint8_t)(instance->generic.data & 0x0F);
+    } else {
+        instance->serial = serial;
+        instance->button = btn;
+        instance->count = cnt;
+        instance->crc = crc;
+    }
+
+    subghz_protocol_encoder_kia_v2_update_data(instance);
+
+    return SubGhzProtocolStatusOk;
+}
+
+void subghz_protocol_encoder_kia_v2_stop(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV2* instance = context;
+    instance->yield_state = 0;
+}
+
+LevelDuration subghz_protocol_encoder_kia_v2_yield(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV2* instance = context;
+
+    // Preamble: 12 pairs of (long high, long low)
+    if (instance->yield_state < 24) {
+        instance->yield_state++;
+        if ((instance->yield_state - 1) % 2 == 0) {
+            return level_duration_make(true, kia_protocol_v2_const.te_long);
+        } else {
+            return level_duration_make(false, kia_protocol_v2_const.te_long);
+        }
+    }
+    // Sync: short high, short low
+    else if (instance->yield_state == 24) {
+        instance->yield_state++;
+        return level_duration_make(true, kia_protocol_v2_const.te_short);
+    }
+    else if (instance->yield_state == 25) {
+        instance->yield_state++;
+        return level_duration_make(false, kia_protocol_v2_const.te_short);
+    }
+    // Data: 51 bits, Manchester encoded (10 = 1, 01 = 0)
+    else if (instance->yield_state < 26 + (51 * 2)) {
+        uint8_t bit_index = (instance->yield_state - 26) / 2;
+        bool pulse_is_first = ((instance->yield_state - 26) % 2 == 0);
+        instance->yield_state++;
+
+        bool bit = (instance->data >> (50 - bit_index)) & 1;
+
+        // 1 -> high, low
+        // 0 -> low, high
+        if (pulse_is_first) {
+            return level_duration_make(bit, kia_protocol_v2_const.te_short);
+        } else {
+            return level_duration_make(!bit, kia_protocol_v2_const.te_short);
+        }
+    }
+    else { // Done
+        return level_duration_reset();
+    }
 }
