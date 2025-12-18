@@ -25,11 +25,22 @@ typedef struct SubGhzProtocolDecoderSuzuki
     uint16_t header_count;
 } SubGhzProtocolDecoderSuzuki;
 
+#include <furi.h>
+
 typedef struct SubGhzProtocolEncoderSuzuki
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    // Encoder state
+    uint32_t serial;
+    uint8_t button;
+    uint16_t count;
+    uint8_t crc;
+
+    uint16_t yield_state;
+    uint64_t data;
 } SubGhzProtocolEncoderSuzuki;
 
 typedef enum
@@ -38,6 +49,14 @@ typedef enum
     SuzukiDecoderStepFoundStartPulse,
     SuzukiDecoderStepSaveDuration,
 } SuzukiDecoderStep;
+
+// Forward declarations for encoder
+void* subghz_protocol_encoder_suzuki_alloc(SubGhzEnvironment* environment);
+void subghz_protocol_encoder_suzuki_free(void* context);
+SubGhzProtocolStatus subghz_protocol_encoder_suzuki_deserialize(void* context, FlipperFormat* flipper_format);
+void subghz_protocol_encoder_suzuki_stop(void* context);
+LevelDuration subghz_protocol_encoder_suzuki_yield(void* context);
+
 
 const SubGhzProtocolDecoder subghz_protocol_suzuki_decoder = {
     .alloc = subghz_protocol_decoder_suzuki_alloc,
@@ -51,17 +70,17 @@ const SubGhzProtocolDecoder subghz_protocol_suzuki_decoder = {
 };
 
 const SubGhzProtocolEncoder subghz_protocol_suzuki_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_suzuki_alloc,
+    .free = subghz_protocol_encoder_suzuki_free,
+    .deserialize = subghz_protocol_encoder_suzuki_deserialize,
+    .stop = subghz_protocol_encoder_suzuki_stop,
+    .yield = subghz_protocol_encoder_suzuki_yield,
 };
 
 const SubGhzProtocol suzuki_protocol = {
     .name = SUZUKI_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable,
+    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &subghz_protocol_suzuki_decoder,
     .encoder = &subghz_protocol_suzuki_encoder,
 };
@@ -300,4 +319,119 @@ void subghz_protocol_decoder_suzuki_get_string(void *context, FuriString *output
         suzuki_get_button_name(instance->generic.btn),
         instance->generic.cnt,
         crc);
+}
+
+// Encoder implementation
+void* subghz_protocol_encoder_suzuki_alloc(SubGhzEnvironment* environment) {
+    UNUSED(environment);
+    SubGhzProtocolEncoderSuzuki* instance = malloc(sizeof(SubGhzProtocolEncoderSuzuki));
+    instance->base.protocol = &suzuki_protocol;
+    instance->generic.protocol_name = instance->base.protocol->name;
+    instance->yield_state = 0;
+    instance->serial = 0;
+    instance->button = 0;
+    instance->count = 0;
+    instance->crc = 0;
+    return instance;
+}
+
+void subghz_protocol_encoder_suzuki_free(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki* instance = context;
+    free(instance);
+}
+
+static void subghz_protocol_encoder_suzuki_update_data(SubGhzProtocolEncoderSuzuki* instance) {
+    uint64_t data = 0;
+    uint32_t serial_button = (instance->serial << 4) | (instance->button & 0xF);
+
+    data |= (uint64_t)0xF << 60; // Manufacturer nibble
+    data |= (uint64_t)instance->count << 44;
+    data |= (uint64_t)serial_button << 12;
+    data |= (uint64_t)instance->crc << 4;
+    // Low 4 bits are 0
+
+    instance->data = data;
+    instance->yield_state = 0;
+}
+
+SubGhzProtocolStatus subghz_protocol_encoder_suzuki_deserialize(void* context, FlipperFormat* flipper_format) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki* instance = context;
+
+    if (subghz_block_generic_deserialize(&instance->generic, flipper_format) != SubGhzProtocolStatusOk) {
+        return SubGhzProtocolStatusError;
+    }
+
+    if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Btn", (uint32_t*)&instance->button, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Cnt", (uint32_t*)&instance->count, 1) ||
+        !flipper_format_read_uint32(flipper_format, "CRC", (uint32_t*)&instance->crc, 1)) {
+
+        // Fallback for older captures
+        uint64_t data = instance->generic.data;
+        uint32_t serial_button = ((instance->generic.data >> 12) & 0xFFFFFFF);
+        instance->serial = serial_button >> 4;
+        instance->button = serial_button & 0xF;
+        instance->count = (data >> 44) & 0xFFFF;
+        instance->crc = (data >> 4) & 0xFF;
+    }
+
+    subghz_protocol_encoder_suzuki_update_data(instance);
+
+    return SubGhzProtocolStatusOk;
+}
+
+void subghz_protocol_encoder_suzuki_stop(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki* instance = context;
+    instance->yield_state = 0;
+}
+
+LevelDuration subghz_protocol_encoder_suzuki_yield(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki* instance = context;
+
+    // Preamble: ~257 pairs of (short high, short low)
+    if (instance->yield_state < 514) {
+        instance->yield_state++;
+        if ((instance->yield_state - 1) % 2 == 0) {
+             return level_duration_make(true, subghz_protocol_suzuki_const.te_short);
+        } else {
+             return level_duration_make(false, subghz_protocol_suzuki_const.te_short);
+        }
+    }
+    // Data: 64 bits
+    // First bit is always 1, sent as a long high
+    else if (instance->yield_state == 514) {
+        instance->yield_state++;
+        return level_duration_make(true, subghz_protocol_suzuki_const.te_long);
+    }
+    // 0 = short high, 1 = long high. All followed by short low
+    else if (instance->yield_state < 515 + (63 * 2)) {
+         uint8_t bit_index = (instance->yield_state - 515) / 2;
+         bool pulse_is_first = ((instance->yield_state - 515) % 2 == 0);
+         instance->yield_state++;
+
+         // Skip first bit, it was sent as sync
+         bool bit = (instance->data >> (62 - bit_index)) & 1;
+
+         if(pulse_is_first) {
+             if(bit) {
+                 return level_duration_make(true, subghz_protocol_suzuki_const.te_long);
+             } else {
+                 return level_duration_make(true, subghz_protocol_suzuki_const.te_short);
+             }
+         } else {
+             return level_duration_make(false, subghz_protocol_suzuki_const.te_short);
+         }
+    }
+     // Gap
+    else if (instance->yield_state == 515 + (63 * 2)) {
+        instance->yield_state++;
+        return level_duration_make(false, SUZUKI_GAP_TIME);
+    }
+    else { // Done
+        return level_duration_reset();
+    }
 }

@@ -25,11 +25,21 @@ typedef struct SubGhzProtocolDecoderSubaru
     uint16_t count;
 } SubGhzProtocolDecoderSubaru;
 
+#include <furi.h>
+
 typedef struct SubGhzProtocolEncoderSubaru
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    // Encoder state
+    uint32_t serial;
+    uint8_t button;
+    uint16_t count;
+
+    uint16_t yield_state;
+    uint64_t data;
 } SubGhzProtocolEncoderSubaru;
 
 typedef enum
@@ -41,6 +51,15 @@ typedef enum
     SubaruDecoderStepSaveDuration,
     SubaruDecoderStepCheckDuration,
 } SubaruDecoderStep;
+
+// Forward declarations for encoder
+void* subghz_protocol_encoder_subaru_alloc(SubGhzEnvironment* environment);
+void subghz_protocol_encoder_subaru_free(void* context);
+SubGhzProtocolStatus subghz_protocol_encoder_subaru_deserialize(void* context, FlipperFormat* flipper_format);
+void subghz_protocol_encoder_subaru_stop(void* context);
+LevelDuration subghz_protocol_encoder_subaru_yield(void* context);
+static void subaru_encode_count(uint32_t serial, uint16_t count, uint8_t* key_bytes);
+
 
 const SubGhzProtocolDecoder subghz_protocol_subaru_decoder = {
     .alloc = subghz_protocol_decoder_subaru_alloc,
@@ -54,17 +73,17 @@ const SubGhzProtocolDecoder subghz_protocol_subaru_decoder = {
 };
 
 const SubGhzProtocolEncoder subghz_protocol_subaru_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_subaru_alloc,
+    .free = subghz_protocol_encoder_subaru_free,
+    .deserialize = subghz_protocol_encoder_subaru_deserialize,
+    .stop = subghz_protocol_encoder_subaru_stop,
+    .yield = subghz_protocol_encoder_subaru_yield,
 };
 
 const SubGhzProtocol subaru_protocol = {
     .name = SUBARU_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable,
+    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &subghz_protocol_subaru_decoder,
     .encoder = &subghz_protocol_subaru_encoder,
 };
@@ -445,4 +464,181 @@ void subghz_protocol_decoder_subaru_get_string(void *context, FuriString *output
         instance->serial,
         instance->button,
         instance->count);
+}
+
+// Encoder implementation
+void* subghz_protocol_encoder_subaru_alloc(SubGhzEnvironment* environment) {
+    UNUSED(environment);
+    SubGhzProtocolEncoderSubaru* instance = malloc(sizeof(SubGhzProtocolEncoderSubaru));
+    instance->base.protocol = &subaru_protocol;
+    instance->generic.protocol_name = instance->base.protocol->name;
+    instance->yield_state = 0;
+    instance->serial = 0;
+    instance->button = 0;
+    instance->count = 0;
+    return instance;
+}
+
+void subghz_protocol_encoder_subaru_free(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru* instance = context;
+    free(instance);
+}
+
+static void subaru_encode_count(uint32_t serial, uint16_t count, uint8_t* key_bytes) {
+    uint8_t hi = (count >> 8) & 0xFF;
+    uint8_t lo = count & 0xFF;
+
+    uint8_t SER0 = (serial >> 0) & 0xFF;
+    uint8_t SER1 = (serial >> 16) & 0xFF;
+    uint8_t SER2 = (serial >> 8) & 0xFF;
+
+    uint8_t total_rot = 4 + lo;
+    for (uint8_t i = 0; i < total_rot; ++i) {
+        uint8_t t_bit = (SER2 & 1);
+        SER2 = (SER2 >> 1) | (SER1 & 1) << 7;
+        SER1 = (SER1 >> 1) | (SER0 & 1) << 7;
+        SER0 = (SER0 >> 1) | t_bit << 7;
+    }
+
+    uint8_t T1 = 0, T2 = 0;
+    if (!((hi >> 2) & 1)) T1 |= 0x10;
+    if (!((hi >> 3) & 1)) T1 |= 0x20;
+    if (!((hi >> 1) & 1)) T2 |= 0x80;
+    if (!((hi >> 0) & 1)) T2 |= 0x40;
+    if (!((hi >> 6) & 1)) T1 |= 0x01;
+    if (!((hi >> 7) & 1)) T1 |= 0x02;
+    if (!((hi >> 5) & 1)) T2 |= 0x08;
+    if (!((hi >> 4) & 1)) T2 |= 0x04;
+
+    uint8_t REG_SH1 = T1 ^ SER1;
+    uint8_t REG_SH2 = T2 ^ SER2;
+
+    key_bytes[7] = ((REG_SH1 & 0xF0) >> 4) | ((REG_SH2 & 0x0F) << 4);
+    key_bytes[5] = 0;
+    if ((REG_SH1 >> 2) & 1) key_bytes[5] |= 0x04;
+    if ((REG_SH1 >> 3) & 1) key_bytes[5] |= 0x08;
+    key_bytes[6] = 0;
+    if ((REG_SH1 >> 1) & 1) key_bytes[6] |= 0x80;
+    if ((REG_SH1 >> 0) & 1) key_bytes[6] |= 0x40;
+
+    key_bytes[6] |= (REG_SH2 & 0xF0) >> 2;
+
+    key_bytes[4] = 0;
+    if (!(lo & 0x01)) key_bytes[4] |= 0x40;
+    if (!(lo & 0x02)) key_bytes[4] |= 0x80;
+    if (!(lo & 0x04)) key_bytes[5] |= 0x01;
+    if (!(lo & 0x08)) key_bytes[5] |= 0x02;
+    if (!(lo & 0x10)) key_bytes[6] |= 0x01;
+    if (!(lo & 0x20)) key_bytes[6] |= 0x02;
+    if (!(lo & 0x40)) key_bytes[5] |= 0x40;
+    if (!(lo & 0x80)) key_bytes[5] |= 0x80;
+}
+
+static void subghz_protocol_encoder_subaru_update_data(SubGhzProtocolEncoderSubaru* instance) {
+    uint8_t key_bytes[8] = {0};
+
+    // Set button and serial
+    key_bytes[0] = instance->button & 0x0F;
+    key_bytes[1] = (instance->serial >> 16) & 0xFF;
+    key_bytes[2] = (instance->serial >> 8) & 0xFF;
+    key_bytes[3] = instance->serial & 0xFF;
+
+    // Encode the count
+    subaru_encode_count(instance->serial, instance->count, key_bytes);
+
+    // Combine into 64-bit data
+    instance->data = 0;
+    for(int i = 0; i < 8; i++) {
+        instance->data |= (uint64_t)key_bytes[i] << (56 - (i * 8));
+    }
+
+    instance->yield_state = 0;
+}
+
+SubGhzProtocolStatus subghz_protocol_encoder_subaru_deserialize(void* context, FlipperFormat* flipper_format) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru* instance = context;
+
+    if (subghz_block_generic_deserialize(&instance->generic, flipper_format) != SubGhzProtocolStatusOk) {
+        return SubGhzProtocolStatusError;
+    }
+
+    if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Btn", (uint32_t*)&instance->button, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Cnt", (uint32_t*)&instance->count, 1)) {
+
+        // Fallback for older captures
+        uint8_t* b = (uint8_t*)&instance->generic.data;
+        instance->serial = ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | b[3];
+        instance->button = b[0] & 0x0F;
+        subaru_decode_count(b, &instance->count);
+    }
+
+    subghz_protocol_encoder_subaru_update_data(instance);
+
+    return SubGhzProtocolStatusOk;
+}
+
+void subghz_protocol_encoder_subaru_stop(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru* instance = context;
+    instance->yield_state = 0;
+}
+
+LevelDuration subghz_protocol_encoder_subaru_yield(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru* instance = context;
+
+    // Preamble: ~25 pairs of (long high, long low)
+    if (instance->yield_state < 50) {
+        instance->yield_state++;
+        if ((instance->yield_state - 1) % 2 == 0) {
+             return level_duration_make(true, subghz_protocol_subaru_const.te_long);
+        } else {
+             return level_duration_make(false, subghz_protocol_subaru_const.te_long);
+        }
+    }
+    // Gap 1
+    else if (instance->yield_state == 50) {
+        instance->yield_state++;
+        return level_duration_make(false, 2750);
+    }
+    // Sync
+    else if (instance->yield_state == 51) {
+        instance->yield_state++;
+        return level_duration_make(true, 2750);
+    }
+    else if (instance->yield_state == 52) {
+        instance->yield_state++;
+        return level_duration_make(false, subghz_protocol_subaru_const.te_long);
+    }
+    // Data: 64 bits
+    // 0 = long high, short low
+    // 1 = short high, short low
+    else if (instance->yield_state < 53 + (64 * 2)) {
+        uint8_t bit_index = (instance->yield_state - 53) / 2;
+        bool pulse_is_first = ((instance->yield_state - 53) % 2 == 0);
+        instance->yield_state++;
+
+        bool bit = (instance->data >> (63 - bit_index)) & 1;
+
+        if (pulse_is_first) {
+            if (bit) {
+                return level_duration_make(true, subghz_protocol_subaru_const.te_short);
+            } else {
+                return level_duration_make(true, subghz_protocol_subaru_const.te_long);
+            }
+        } else {
+            return level_duration_make(false, subghz_protocol_subaru_const.te_short);
+        }
+    }
+    // Gap 2
+    else if (instance->yield_state == 53 + (64 * 2)) {
+        instance->yield_state++;
+        return level_duration_make(false, 4000);
+    }
+    else { // Done
+        return level_duration_reset();
+    }
 }

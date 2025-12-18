@@ -19,8 +19,12 @@ Decoders:
 - Suzuki
 - Volkswagen (VW)
 
-Encoders: **Coming Soon**
+Encoders:
 - KIA V0
+- Ford V0
+- Subaru
+- Suzuki
+- Volkswagen (VW)
   
 ---
 
