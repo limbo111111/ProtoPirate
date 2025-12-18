@@ -31,6 +31,11 @@ struct SubGhzProtocolEncoderFiatV0 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+    uint32_t hop;
+    uint32_t fix;
+    uint8_t endbyte;
+    uint64_t data;
+    uint16_t yield_state;
 };
 
 typedef enum {
@@ -51,11 +56,11 @@ const SubGhzProtocolDecoder subghz_protocol_fiat_v0_decoder = {
 };
 
 const SubGhzProtocolEncoder subghz_protocol_fiat_v0_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_fiat_v0_alloc,
+    .free = subghz_protocol_encoder_fiat_v0_free,
+    .deserialize = subghz_protocol_encoder_fiat_v0_deserialize,
+    .stop = subghz_protocol_encoder_fiat_v0_stop,
+    .yield = subghz_protocol_encoder_fiat_v0_yield,
 };
 
 const SubGhzProtocol fiat_protocol_v0 = {
@@ -318,4 +323,82 @@ void subghz_protocol_decoder_fiat_v0_get_string(void* context, FuriString* outpu
         instance->hop,
         instance->fix,
         instance->endbyte);
+}
+
+static void subghz_protocol_encoder_fiat_v0_update_data(SubGhzProtocolEncoderFiatV0* instance) {
+    instance->data = ((uint64_t)instance->hop << 32) | instance->fix;
+    instance->yield_state = 0;
+}
+
+void* subghz_protocol_encoder_fiat_v0_alloc(SubGhzEnvironment* environment) {
+    UNUSED(environment);
+    SubGhzProtocolEncoderFiatV0* instance = malloc(sizeof(SubGhzProtocolEncoderFiatV0));
+    instance->base.protocol = &fiat_protocol_v0;
+    instance->generic.protocol_name = instance->base.protocol->name;
+    instance->yield_state = 0;
+    return instance;
+}
+
+void subghz_protocol_encoder_fiat_v0_free(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderFiatV0* instance = context;
+    free(instance);
+}
+
+SubGhzProtocolStatus
+    subghz_protocol_encoder_fiat_v0_deserialize(void* context, FlipperFormat* flipper_format) {
+    furi_assert(context);
+    SubGhzProtocolEncoderFiatV0* instance = context;
+
+    if(subghz_block_generic_deserialize(&instance->generic, flipper_format) !=
+       SubGhzProtocolStatusOk) {
+        return SubGhzProtocolStatusError;
+    }
+
+    instance->hop = instance->generic.cnt;
+    instance->fix = instance->generic.serial;
+    instance->endbyte = instance->generic.btn;
+
+    subghz_protocol_encoder_fiat_v0_update_data(instance);
+
+    return SubGhzProtocolStatusOk;
+}
+
+void subghz_protocol_encoder_fiat_v0_stop(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderFiatV0* instance = context;
+    instance->yield_state = 0;
+}
+
+LevelDuration subghz_protocol_encoder_fiat_v0_yield(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderFiatV0* instance = context;
+
+    if(instance->yield_state < 300) {
+        instance->yield_state++;
+        return level_duration_make(
+            instance->yield_state % 2 != 0, subghz_protocol_fiat_v0_const.te_short);
+    } else if(instance->yield_state == 300) {
+        instance->yield_state++;
+        return level_duration_make(false, 800);
+    } else if(instance->yield_state < 301 + (71 * 2)) {
+        uint8_t bit_index = (instance->yield_state - 301) / 2;
+        bool pulse_is_first = ((instance->yield_state - 301) % 2 == 0);
+        instance->yield_state++;
+
+        bool bit;
+        if(bit_index < 64) {
+            bit = (instance->data >> (63 - bit_index)) & 1;
+        } else {
+            bit = (instance->endbyte >> (70 - bit_index)) & 1;
+        }
+
+        if(pulse_is_first) {
+            return level_duration_make(!bit, subghz_protocol_fiat_v0_const.te_short);
+        } else {
+            return level_duration_make(bit, subghz_protocol_fiat_v0_const.te_short);
+        }
+    } else {
+        return level_duration_reset();
+    }
 }

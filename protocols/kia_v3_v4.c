@@ -192,7 +192,7 @@ const SubGhzProtocol kia_protocol_v3_v4 = {
     .name = KIA_PROTOCOL_V3_V4_NAME,
     .type = SubGhzProtocolTypeDynamic,
     .flag = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM |
-            SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable,
+            SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &kia_protocol_v3_v4_decoder,
     .encoder = &kia_protocol_v3_v4_encoder,
 };
@@ -436,7 +436,7 @@ void kia_protocol_encoder_v3_v4_free(void* context) {
 
 static void subghz_protocol_encoder_kia_v3_v4_update_data(SubGhzProtocolEncoderKiaV3V4* instance) {
     uint32_t decrypted = (instance->button << 28) |
-                         ((instance->serial & 0xFF) << 16) |
+                         (((instance->serial >> 24) & 0xFF) << 16) |
                          instance->count;
 
     uint32_t encrypted = keeloq_common_encrypt(decrypted, kia_mf_key);
@@ -488,29 +488,28 @@ LevelDuration kia_protocol_encoder_v3_v4_yield(void* context) {
 
     if (instance->yield_state < 16) { // Preamble
         instance->yield_state++;
-        return level_duration_make((instance->yield_state -1) % 2 == 0, 400);
+        return level_duration_make(instance->yield_state % 2 != 0, 400);
     } else if (instance->yield_state < 18) { // Sync
         instance->yield_state++;
-        if (instance->version == 1) { // V3
-            return level_duration_make((instance->yield_state - 1) == 16, (instance->yield_state - 1) == 16 ? 400 : 1200);
-        } else { // V4
-            return level_duration_make((instance->yield_state - 1) == 16, (instance->yield_state - 1) == 16 ? 1200 : 400);
+        bool is_v3 = (instance->version == 1);
+        if ((instance->yield_state - 1) == 16) {
+            return level_duration_make(true, is_v3 ? 400 : 1200);
+        } else {
+            return level_duration_make(false, is_v3 ? 1200 : 400);
         }
-    } else if (instance->yield_state < 18 + 64) { // Data
-        uint8_t bit_index = instance->yield_state - 18;
+    } else if (instance->yield_state < 18 + (64 * 2)) { // Data
+        uint8_t bit_index = (instance->yield_state - 18) / 2;
+        bool pulse_is_first = ((instance->yield_state - 18) % 2 == 0);
         instance->yield_state++;
 
-        bool bit = (instance->data >> (63-bit_index)) & 1;
+        bool bit = (instance->data >> (63 - bit_index)) & 1;
 
-        if (bit) return level_duration_make(true, 800); // '1' bit
-        else return level_duration_make(true, 400); // '0' bit
-
-    } else if (instance->yield_state < 18 + 64 + 64) { // Low pulses after each data bit
-         instance->yield_state++;
-         return level_duration_make(false, 400);
-    }
-
-    else { // Done
+        if (pulse_is_first) {
+            return level_duration_make(true, bit ? 800 : 400);
+        } else {
+            return level_duration_make(false, 400);
+        }
+    } else { // Done
         return level_duration_reset();
     }
 }

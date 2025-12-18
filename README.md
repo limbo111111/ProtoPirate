@@ -18,12 +18,14 @@ Decoders:
 - Subaru
 - Suzuki
 - Volkswagen (VW)
+- Fiat V0
 
 Encoders:
 - KIA V0
 - KIA V1
 - KIA V2
 - KIA V3 / V4
+- KIA V5
 - Ford V0
 - Subaru
 - Suzuki

@@ -17,10 +17,21 @@ typedef struct SubGhzProtocolDecoderBMW {
     uint8_t crc_type; // 0 = unknown, 8 = CRC8, 16 = CRC16
 } SubGhzProtocolDecoderBMW;
 
+#include <furi.h>
+
 typedef struct SubGhzProtocolEncoderBMW {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    // Encoder state
+    uint32_t serial;
+    uint8_t button;
+    uint16_t count;
+    uint8_t crc_type; // 8 or 16
+
+    uint16_t yield_state;
+    uint64_t data;
 } SubGhzProtocolEncoderBMW;
 
 typedef enum {
@@ -29,6 +40,14 @@ typedef enum {
     BMWDecoderStepSaveDuration,
     BMWDecoderStepCheckDuration,
 } BMWDecoderStep;
+
+// Forward declarations for encoder
+void* subghz_protocol_encoder_bmw_alloc(SubGhzEnvironment* environment);
+void subghz_protocol_encoder_bmw_free(void* context);
+SubGhzProtocolStatus subghz_protocol_encoder_bmw_deserialize(void* context, FlipperFormat* flipper_format);
+void subghz_protocol_encoder_bmw_stop(void* context);
+LevelDuration subghz_protocol_encoder_bmw_yield(void* context);
+
 
 static void subghz_protocol_decoder_bmw_reset_internal(SubGhzProtocolDecoderBMW* instance) {
     memset(&instance->decoder, 0, sizeof(instance->decoder));
@@ -52,18 +71,17 @@ const SubGhzProtocolDecoder subghz_protocol_bmw_decoder = {
 };
 
 const SubGhzProtocolEncoder subghz_protocol_bmw_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_bmw_alloc,
+    .free = subghz_protocol_encoder_bmw_free,
+    .deserialize = subghz_protocol_encoder_bmw_deserialize,
+    .stop = subghz_protocol_encoder_bmw_stop,
+    .yield = subghz_protocol_encoder_bmw_yield,
 };
 
 const SubGhzProtocol bmw_protocol = {
     .name = BMW_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_868 | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable,
+    .flag = SubGhzProtocolFlag_868 | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
 
     .decoder = &subghz_protocol_bmw_decoder,
     .encoder = &subghz_protocol_bmw_encoder,
@@ -293,4 +311,107 @@ void subghz_protocol_decoder_bmw_get_string(void* context, FuriString* output) {
         instance->generic.serial,
         instance->generic.btn,
         instance->generic.cnt);
+}
+
+// Encoder implementation
+void* subghz_protocol_encoder_bmw_alloc(SubGhzEnvironment* environment) {
+    UNUSED(environment);
+    SubGhzProtocolEncoderBMW* instance = malloc(sizeof(SubGhzProtocolEncoderBMW));
+    instance->base.protocol = &bmw_protocol;
+    instance->generic.protocol_name = instance->base.protocol->name;
+    instance->yield_state = 0;
+    return instance;
+}
+
+void subghz_protocol_encoder_bmw_free(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderBMW* instance = context;
+    free(instance);
+}
+
+static void subghz_protocol_encoder_bmw_update_data(SubGhzProtocolEncoderBMW* instance) {
+    uint64_t data = 0;
+    data |= (uint64_t)instance->serial << 12;
+    data |= (uint64_t)instance->button << 8;
+    data |= (uint64_t)instance->count << 40;
+
+    uint8_t* raw_bytes = (uint8_t*)&data;
+    size_t len = (instance->generic.data_count_bit + 7) / 8;
+
+    if (instance->crc_type == 8) {
+        uint8_t crc = subghz_protocol_bmw_crc8(raw_bytes, len - 1);
+        data |= crc;
+    } else if (instance->crc_type == 16) {
+        uint16_t crc = subghz_protocol_bmw_crc16(raw_bytes, len - 2);
+        data |= crc;
+    }
+
+    instance->data = data;
+    instance->yield_state = 0;
+}
+
+SubGhzProtocolStatus subghz_protocol_encoder_bmw_deserialize(void* context, FlipperFormat* flipper_format) {
+    furi_assert(context);
+    SubGhzProtocolEncoderBMW* instance = context;
+
+    if (subghz_block_generic_deserialize(&instance->generic, flipper_format) != SubGhzProtocolStatusOk) {
+        return SubGhzProtocolStatusError;
+    }
+
+    if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Btn", (uint32_t*)&instance->button, 1) ||
+        !flipper_format_read_uint32(flipper_format, "Cnt", (uint32_t*)&instance->count, 1) ||
+        !flipper_format_read_uint32(flipper_format, "CRC_Type", (uint32_t*)&instance->crc_type, 1)) {
+
+        // Fallback for older captures
+        instance->serial = (uint32_t)((instance->generic.data >> 12) & 0x0FFFFFFF);
+        instance->button = (uint8_t)((instance->generic.data >> 8) & 0x0F);
+        instance->count = (uint16_t)((instance->generic.data >> 40) & 0xFFFF);
+
+        // Cannot determine CRC type from raw data alone, default to 8
+        instance->crc_type = 8;
+    }
+
+    subghz_protocol_encoder_bmw_update_data(instance);
+
+    return SubGhzProtocolStatusOk;
+}
+
+void subghz_protocol_encoder_bmw_stop(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderBMW* instance = context;
+    instance->yield_state = 0;
+}
+
+LevelDuration subghz_protocol_encoder_bmw_yield(void* context) {
+    furi_assert(context);
+    SubGhzProtocolEncoderBMW* instance = context;
+
+    // Preamble: 16 pairs of (short high, short low)
+    if (instance->yield_state < 32) {
+        instance->yield_state++;
+        return level_duration_make(instance->yield_state % 2 != 0, subghz_protocol_bmw_const.te_short);
+    }
+    // Sync: long high, long low
+    else if (instance->yield_state < 34) {
+        instance->yield_state++;
+        return level_duration_make(instance->yield_state % 2 != 0, subghz_protocol_bmw_const.te_long);
+    }
+    // Data
+    else if (instance->yield_state < 34 + (61 * 2)) {
+        uint8_t bit_index = (instance->yield_state - 34) / 2;
+        bool pulse_is_first = ((instance->yield_state - 34) % 2 == 0);
+        instance->yield_state++;
+
+        bool bit = (instance->data >> (60 - bit_index)) & 1;
+
+        if (pulse_is_first) {
+            return level_duration_make(true, bit ? subghz_protocol_bmw_const.te_long : subghz_protocol_bmw_const.te_short);
+        } else {
+            return level_duration_make(false, bit ? subghz_protocol_bmw_const.te_long : subghz_protocol_bmw_const.te_short);
+        }
+    }
+    else { // Done
+        return level_duration_reset();
+    }
 }

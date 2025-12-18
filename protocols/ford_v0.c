@@ -589,20 +589,25 @@ LevelDuration subghz_protocol_encoder_ford_v0_yield(void* context) {
         return level_duration_make(false, 3500);
     }
 
-    // Data: 80 bits, Manchester encoded
-    else if (instance->yield_state < 52 + (80 * 2)) {
-        uint8_t bit_index = (instance->yield_state - 52) / 2;
-        bool pulse_is_first = ((instance->yield_state - 52) % 2 == 0);
+    // Data: 80 bits, PWM
+    else if (instance->yield_state < 52 + 80) {
+        uint8_t bit_index = instance->yield_state - 52;
         instance->yield_state++;
 
         bool bit = (bit_index < 64) ?
                    ((instance->data[0] >> (63 - bit_index)) & 1) :
                    ((instance->data[1] >> (79 - bit_index)) & 1);
 
-        // Manchester: 0 -> high-low, 1 -> low-high
-        // Decoder expects: 0 -> short high/low, 1 -> short low/high
-        bool level = pulse_is_first ? !bit : bit;
-        return level_duration_make(level, subghz_protocol_ford_v0_const.te_short);
+        if(bit) {
+            return level_duration_make(true, subghz_protocol_ford_v0_const.te_long);
+        } else {
+            return level_duration_make(true, subghz_protocol_ford_v0_const.te_short);
+        }
+    }
+    // Low pulse after each data bit
+    else if (instance->yield_state < 52 + 80 + 80) {
+        instance->yield_state++;
+        return level_duration_make(false, subghz_protocol_ford_v0_const.te_short);
     }
     else { // Done
         return level_duration_reset();
