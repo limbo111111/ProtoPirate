@@ -564,11 +564,16 @@ SubGhzProtocolStatus subghz_protocol_encoder_subaru_deserialize(void* context, F
 
     uint32_t temp_btn = 0;
     uint32_t temp_cnt = 0;
-    if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1) ||
-        !flipper_format_read_uint32(flipper_format, "Btn", &temp_btn, 1) ||
-        !flipper_format_read_uint32(flipper_format, "Cnt", &temp_cnt, 1)) {
-        // Fallback for older captures
-        uint8_t* b = (uint8_t*)&instance->generic.data;
+    if(!flipper_format_read_uint32(flipper_format, "Serial", &instance->serial, 1) ||
+       !flipper_format_read_uint32(flipper_format, "Btn", &temp_btn, 1) ||
+       !flipper_format_read_uint32(flipper_format, "Cnt", &temp_cnt, 1)) {
+        // Fallback for older captures - correctly handle endianness
+        uint8_t b[8];
+        uint64_t data = instance->generic.data;
+        for(int i = 0; i < 8; i++) {
+            b[i] = (data >> (56 - (i * 8))) & 0xFF;
+        }
+
         instance->serial = ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | b[3];
         instance->button = b[0] & 0x0F;
         subaru_decode_count(b, &instance->count);
