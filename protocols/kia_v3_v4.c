@@ -472,7 +472,9 @@ SubGhzProtocolStatus kia_protocol_encoder_v3_v4_deserialize(void* context, Flipp
         return SubGhzProtocolStatusError;
     }
 
-    flipper_format_read_uint32(flipper_format, "Version", (uint32_t*)&instance->version, 1);
+    uint32_t temp = 0;
+    flipper_format_read_uint32(flipper_format, "Version", &temp, 1);
+    instance->version = temp;
     instance->serial = instance->generic.serial;
     instance->button = instance->generic.btn;
     instance->count = instance->generic.cnt;
