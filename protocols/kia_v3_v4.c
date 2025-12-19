@@ -453,7 +453,7 @@ static void subghz_protocol_encoder_kia_v3_v4_update_data(SubGhzProtocolEncoderK
 
     uint64_t data = 0;
     for (int i = 0; i < 8; i++) {
-        data |= (uint64_t)b[i] << (i * 8);
+        data |= (uint64_t)b[i] << (56 - (i * 8));
     }
 
     if (instance->version == 1) { // V3

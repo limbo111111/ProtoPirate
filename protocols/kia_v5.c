@@ -416,7 +416,7 @@ static void subghz_protocol_encoder_kia_v5_update_data(SubGhzProtocolEncoderKiaV
                 reversed_byte |= (1 << (7 - b));
             }
         }
-        data |= (uint64_t)reversed_byte << (i * 8);
+        data |= (uint64_t)reversed_byte << (56 - (i * 8));
     }
 
     instance->data = data;
