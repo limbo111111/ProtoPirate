@@ -1,5 +1,6 @@
 // protopirate_app.c
 #include "protopirate_app_i.h"
+#include <flipper_format/flipper_format_i.h>
 
 #include <furi.h>
 #include <furi_hal.h>
@@ -91,8 +92,8 @@ ProtoPirateApp *protopirate_app_alloc()
 
     // Init setting
     app->setting = subghz_setting_alloc();
+    subghz_setting_load(app->setting, "/ext/subghz/assets/setting.txt");
     app->loaded_file_path = NULL;
-    subghz_setting_load(app->setting, EXT_PATH("subghz/assets/setting_user"));
 
     // Init Worker & Protocol & History
     app->lock = ProtoPirateLockOff;
