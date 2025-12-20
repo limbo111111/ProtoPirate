@@ -1,8 +1,6 @@
 # ufbt build artifacts
-/dist/
 /build/
 *.uf2
-*.fap
 *.dfu
 *.elf
 *.bin
