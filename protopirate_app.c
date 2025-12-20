@@ -91,6 +91,7 @@ ProtoPirateApp *protopirate_app_alloc()
 
     // Init setting
     app->setting = subghz_setting_alloc();
+    subghz_setting_load(app->setting, EXT_PATH("subghz/assets/setting.txt"));
     app->loaded_file_path = NULL;
     subghz_setting_load(app->setting, EXT_PATH("subghz/assets/setting_user"));
 

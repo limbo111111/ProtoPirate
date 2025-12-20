@@ -40,12 +40,24 @@ typedef enum {
 } KiaV3V4DecoderStep;
 
 // --- Encoder Structures ---
-typedef struct SubGhzProtocolEncoderKiaV3V4 {
+typedef enum { // Encoder state machine
+    KiaV3V4EncoderStepReset = 0,
+    KiaV3V4EncoderStepPreamble,
+    KiaV3V4EncoderStepSync,
+    KiaV3V4EncoderStepData,
+    KiaV3V4EncoderStepStop,
+} KiaV3V4EncoderStep;
+
+struct SubGhzProtocolEncoderKiaV3V4 {
     SubGhzProtocolEncoderBase base;
-    SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+    KiaV3V4EncoderStep state;
     uint8_t version;
-} SubGhzProtocolEncoderKiaV3V4;
+    uint16_t bit_count;
+    bool is_second_half;
+    uint8_t repeat_count;
+    uint64_t data_to_send;
+};
 
 // --- Crypto Helpers ---
 
@@ -366,8 +378,6 @@ void* kia_protocol_encoder_v3_v4_alloc(SubGhzEnvironment* environment) {
     SubGhzProtocolEncoderKiaV3V4* instance = malloc(sizeof(SubGhzProtocolEncoderKiaV3V4));
     instance->base.protocol = &kia_protocol_v3_v4;
     instance->generic.protocol_name = instance->base.protocol->name;
-    instance->encoder.encode_data = 0;
-    instance->encoder.encode_count_bit = 0;
     return instance;
 }
 
@@ -381,6 +391,7 @@ SubGhzProtocolStatus
     kia_protocol_encoder_v3_v4_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolEncoderKiaV3V4* instance = context;
+    instance->state = KiaV3V4EncoderStepReset;
 
     if(SubGhzProtocolStatusOk !=
        subghz_block_generic_deserialize(&instance->generic, flipper_format)) {
@@ -394,153 +405,126 @@ SubGhzProtocolStatus
     }
     instance->version = (uint8_t)version;
 
-    // Reconstruct the decrypted data from the saved fields
-    // Decrypted: [Btn(4) | SerialLSB(8) | Cnt(16)] - standard Keeloq packing (often reversed check)
-    // Actually from decoder: dec_btn is bits 28-31, dec_serial_lsb is 16-23, cnt is 0-15.
+    // Reconstruct the decrypted data and encrypt it
     uint32_t decrypted = (instance->generic.btn << 28) |
                          ((instance->generic.serial & 0xFF) << 16) | instance->generic.cnt;
-
-    // Encrypt the data to get the payload
     uint32_t encrypted = keeloq_common_encrypt(decrypted, kia_mf_key);
 
-    // Build the 64-bit data packet: [Encrypted(32) | Serial(28) | Btn(4)]
-    // Based on decoder: 
-    // Bytes 0-3: Encrypted
-    // Bytes 4-7: Serial + Btn
-    
-    // Note: The decoder extracts using reverse8, so we must construct bytes LSB-first relative to that.
-    // Bytes are sent as PWM. The decoder's "reverse8" implies the bitstream is LSB-first per byte
-    // or the storage is inverted. Let's assume standard linear filling for now and match the decoder.
-
+    // Build the 64-bit data packet
     uint64_t data = 0;
     uint8_t* b = (uint8_t*)&data;
-
-    // Bytes 0-3: Encrypted. Decoder does reverse8(b[0]) -> LSB of encrypted.
-    // So b[0] must contain reverse8(encrypted & 0xFF).
     b[0] = reverse8(encrypted & 0xFF);
     b[1] = reverse8((encrypted >> 8) & 0xFF);
     b[2] = reverse8((encrypted >> 16) & 0xFF);
     b[3] = reverse8((encrypted >> 24) & 0xFF);
-
-    // Bytes 4-7: Serial + Btn.
-    // Decoder: serial LSB is b[4], serial MSB is b[7] high nibble. Btn is b[7] low nibble?
-    // Decoder: btn = (reverse8(b[7]) & 0xF0) >> 4;
-    // Decoder: serial = reverse8(b[4]) | ... | reverse8(b[7] & 0xF0) << 24;
-    
     uint32_t ser = instance->generic.serial;
     b[4] = reverse8(ser & 0xFF);
     b[5] = reverse8((ser >> 8) & 0xFF);
     b[6] = reverse8((ser >> 16) & 0xFF);
-    
-    // Top byte is mixed: Serial MSB (4 bits) + Btn (4 bits)
-    // Decoder: reverse8(b[7]) -> top 4 bits are Btn, bottom 4 bits are Serial MSB.
-    // Let's construct a byte "mixed" such that reverse8(mixed) = (Btn << 4) | (SerialMSB)
     uint8_t mixed_dec = ((instance->generic.btn & 0x0F) << 4) | ((ser >> 24) & 0x0F);
     b[7] = reverse8(mixed_dec);
 
-    // For V3, the data is inverted
-    if(instance->version == 1) {
-        for(int i=0; i<8; i++) b[i] = ~b[i];
+    if(instance->version == 1) { // V3 inverts data
+        for(int i = 0; i < 8; i++) b[i] = ~b[i];
     }
 
-    instance->encoder.encode_data = data;
-    instance->encoder.encode_count_bit = 64;
+    instance->data_to_send = data;
+    instance->repeat_count = 5; // Send 5 times by default
 
     return SubGhzProtocolStatusOk;
 }
 
 // State machine for Encoder Yield
-SubGhzLevelDuration kia_protocol_encoder_v3_v4_yield(void* context) {
+LevelDuration kia_protocol_encoder_v3_v4_yield(void* context) {
     furi_assert(context);
     SubGhzProtocolEncoderKiaV3V4* instance = context;
 
-    if(instance->encoder.repeat == 0) {
-        return level_duration_make(false, 0); // Stop
+    if(instance->repeat_count == 0) {
+        instance->state = KiaV3V4EncoderStepStop;
     }
 
-    switch(instance->encoder.front) {
-    case SubGhzProtocolBlockEncoderStepReset:
-        instance->encoder.front = SubGhzProtocolBlockEncoderStepPreamble;
-        instance->encoder.count = 0;
-        return level_duration_make(false, kia_protocol_v3_v4_const.te_short * 10); // Quiet start
+    LevelDuration level_duration;
 
-    case SubGhzProtocolBlockEncoderStepPreamble:
-        // 8x Pairs of High/Low (400us each)
-        if(instance->encoder.count < 16) {
-            bool level = (instance->encoder.count % 2 == 0);
-            instance->encoder.count++;
-            return level_duration_make(level, kia_protocol_v3_v4_const.te_short);
-        }
-        instance->encoder.front = SubGhzProtocolBlockEncoderStepSync;
-        // Fallthrough to Sync
+    switch(instance->state) {
+    case KiaV3V4EncoderStepReset:
+        instance->state = KiaV3V4EncoderStepPreamble;
+        instance->bit_count = 0;
+        level_duration = level_duration_make(false, kia_protocol_v3_v4_const.te_short * 10);
+        break;
 
-    case SubGhzProtocolBlockEncoderStepSync:
-        // V3 (Version 1): High(400) -> Low(1200)
-        // V4 (Version 0): High(1200) -> Low(400)
-        if(instance->version == 1) { // V3
-             // Step 1: High 400
-             if(instance->encoder.count == 16) { 
-                 instance->encoder.count++; 
-                 return level_duration_make(true, kia_protocol_v3_v4_const.te_short);
-             }
-             // Step 2: Low 1200
-             if(instance->encoder.count == 17) {
-                 instance->encoder.front = SubGhzProtocolBlockEncoderStepData;
-                 instance->encoder.count = 0; // Reset bit counter
-                 return level_duration_make(false, kia_protocol_v3_v4_const.te_short * 3);
-             }
-        } else { // V4
-             // Step 1: High 1200
-             if(instance->encoder.count == 16) { 
-                 instance->encoder.count++; 
-                 return level_duration_make(true, kia_protocol_v3_v4_const.te_short * 3);
-             }
-             // Step 2: Low 400
-             if(instance->encoder.count == 17) {
-                 instance->encoder.front = SubGhzProtocolBlockEncoderStepData;
-                 instance->encoder.count = 0; // Reset bit counter
-                 return level_duration_make(false, kia_protocol_v3_v4_const.te_short);
-             }
+    case KiaV3V4EncoderStepPreamble:
+        if(instance->bit_count < 16) {
+            bool level = (instance->bit_count % 2 == 0); // High, Low, High, Low ...
+            instance->bit_count++;
+            level_duration = level_duration_make(level, kia_protocol_v3_v4_const.te_short);
+        } else {
+            instance->state = KiaV3V4EncoderStepSync;
+            instance->bit_count = 0;
+            // Fallthrough to Sync
         }
         break;
 
-    case SubGhzProtocolBlockEncoderStepData:
-        // Send 64 bits. PWM.
-        // Bit index = instance->encoder.count
-        if(instance->encoder.count < 64) {
-            uint8_t byte_idx = instance->encoder.count / 8;
-            uint8_t bit_idx = 7 - (instance->encoder.count % 8); // MSB first from byte array
-            
-            // Access raw bytes of encoded data
-            uint8_t* b = (uint8_t*)&instance->encoder.encode_data;
+    case KiaV3V4EncoderStepSync:
+        if(instance->version == 1) { // V3
+            if(instance->bit_count == 0) {
+                instance->bit_count++;
+                level_duration = level_duration_make(true, kia_protocol_v3_v4_const.te_short);
+            } else {
+                instance->state = KiaV3V4EncoderStepData;
+                instance->bit_count = 0;
+                level_duration =
+                    level_duration_make(false, kia_protocol_v3_v4_const.te_short * 3);
+            }
+        } else { // V4
+            if(instance->bit_count == 0) {
+                instance->bit_count++;
+                level_duration =
+                    level_duration_make(true, kia_protocol_v3_v4_const.te_short * 3);
+            } else {
+                instance->state = KiaV3V4EncoderStepData;
+                instance->bit_count = 0;
+                level_duration = level_duration_make(false, kia_protocol_v3_v4_const.te_short);
+            }
+        }
+        break;
+
+    case KiaV3V4EncoderStepData:
+        if(instance->bit_count < 64) {
+            uint8_t byte_idx = instance->bit_count / 8;
+            uint8_t bit_idx = 7 - (instance->bit_count % 8);
+            uint8_t* b = (uint8_t*)&instance->data_to_send;
             bool bit = (b[byte_idx] >> bit_idx) & 1;
 
-            if(!instance->encoder.is_second_half) {
-                // High part
-                instance->encoder.is_second_half = true;
-                return level_duration_make(true, bit ? kia_protocol_v3_v4_const.te_long : kia_protocol_v3_v4_const.te_short);
+            if(!instance->is_second_half) {
+                instance->is_second_half = true;
+                level_duration = level_duration_make(
+                    true,
+                    bit ? kia_protocol_v3_v4_const.te_long :
+                          kia_protocol_v3_v4_const.te_short);
             } else {
-                // Low part (always short)
-                instance->encoder.is_second_half = false;
-                instance->encoder.count++;
-                return level_duration_make(false, kia_protocol_v3_v4_const.te_short);
+                instance->is_second_half = false;
+                instance->bit_count++;
+                level_duration = level_duration_make(false, kia_protocol_v3_v4_const.te_short);
             }
         } else {
-            // End of packet
-            instance->encoder.repeat--;
-            instance->encoder.front = SubGhzProtocolBlockEncoderStepReset;
-            return level_duration_make(false, kia_protocol_v3_v4_const.te_short * 25); // Guard time
+            instance->repeat_count--;
+            instance->state = KiaV3V4EncoderStepReset;
+            level_duration = level_duration_make(false, kia_protocol_v3_v4_const.te_short * 25);
         }
         break;
-    }
 
-    return level_duration_make(false, 0);
+    case KiaV3V4EncoderStepStop:
+    default:
+        level_duration = level_duration_reset();
+        break;
+    }
+    return level_duration;
 }
 
 void kia_protocol_encoder_v3_v4_stop(void* context) {
     furi_assert(context);
     SubGhzProtocolEncoderKiaV3V4* instance = context;
-    instance->encoder.repeat = 0;
+    instance->repeat_count = 0;
 }
 
 const SubGhzProtocolEncoder kia_protocol_v3_v4_encoder = {
@@ -555,7 +539,7 @@ const SubGhzProtocol kia_protocol_v3_v4 = {
     .name = KIA_PROTOCOL_V3_V4_NAME,
     .type = SubGhzProtocolTypeDynamic,
     .flag = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM |
-            SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable,
+            SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &kia_protocol_v3_v4_decoder,
     .encoder = &kia_protocol_v3_v4_encoder,
 };

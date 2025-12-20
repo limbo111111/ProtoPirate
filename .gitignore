@@ -1,2 +1,17 @@
+# ufbt build artifacts
+/dist/
+/build/
+*.uf2
+*.fap
+*.dfu
+*.elf
+*.bin
+*.hex
+*.lst
+*.map
+*.bak
+*.exe
 
-.DS_Store
+# VSCode
+.vscode/
+compile_commands.json

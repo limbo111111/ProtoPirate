@@ -4,8 +4,8 @@
 
 #define KIA_PROTOCOL_V3_V4_NAME "Kia V3/V4"
 
-typedef void SubGhzProtocolDecoderKiaV3V4;
-typedef void SubGhzProtocolEncoderKiaV3V4;
+typedef struct SubGhzProtocolDecoderKiaV3V4 SubGhzProtocolDecoderKiaV3V4;
+typedef struct SubGhzProtocolEncoderKiaV3V4 SubGhzProtocolEncoderKiaV3V4;
 
 extern const SubGhzProtocolDecoder kia_protocol_v3_v4_decoder;
 extern const SubGhzProtocolEncoder kia_protocol_v3_v4_encoder;
@@ -31,4 +31,4 @@ SubGhzProtocolStatus kia_protocol_encoder_v3_v4_deserialize(
     void* context,
     FlipperFormat* flipper_format);
 void kia_protocol_encoder_v3_v4_stop(void* context);
-SubGhzLevelDuration kia_protocol_encoder_v3_v4_yield(void* context);
+LevelDuration kia_protocol_encoder_v3_v4_yield(void* context);
