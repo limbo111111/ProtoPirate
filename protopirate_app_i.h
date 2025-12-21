@@ -2,6 +2,7 @@
 #pragma once
 
 #include "helpers/protopirate_types.h"
+#include "helpers/protopirate_settings.h"
 #include "scenes/protopirate_scene.h"
 #include "views/protopirate_receiver.h"
 #include "views/protopirate_receiver_info.h"
@@ -20,6 +21,7 @@
 #include <lib/subghz/receiver.h>
 #include <lib/subghz/transmitter.h>
 #include <lib/subghz/devices/devices.h>
+#include <dialogs/dialogs.h>
 
 typedef struct ProtoPirateApp ProtoPirateApp;
 
@@ -55,6 +57,8 @@ struct ProtoPirateApp
     SubGhzSetting *setting;
     ProtoPirateLock lock;
     FuriString *loaded_file_path;
+    bool auto_save;
+    ProtoPirateSettings settings;
 };
 
 void protopirate_preset_init(

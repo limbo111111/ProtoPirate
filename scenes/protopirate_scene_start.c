@@ -6,6 +6,7 @@ typedef enum
     SubmenuIndexProtoPirateReceiver,
     SubmenuIndexProtoPirateSaved,
     SubmenuIndexProtoPirateReceiverConfig,
+    SubmenuIndexProtoPirateSubDecode,
     SubmenuIndexProtoPirateAbout,
 } SubmenuIndex;
 
@@ -39,6 +40,14 @@ void protopirate_scene_start_on_enter(void *context)
         app->submenu,
         "Configuration",
         SubmenuIndexProtoPirateReceiverConfig,
+        protopirate_scene_start_submenu_callback,
+        app);
+
+    // ADD THIS ITEM
+    submenu_add_item(
+        app->submenu,
+        "Sub Decode",
+        SubmenuIndexProtoPirateSubDecode,
         protopirate_scene_start_submenu_callback,
         app);
 
@@ -81,6 +90,11 @@ bool protopirate_scene_start_on_event(void *context, SceneManagerEvent event)
         else if (event.event == SubmenuIndexProtoPirateReceiverConfig)
         {
             scene_manager_next_scene(app->scene_manager, ProtoPirateSceneReceiverConfig);
+            consumed = true;
+        }
+        else if (event.event == SubmenuIndexProtoPirateSubDecode)
+        {
+            scene_manager_next_scene(app->scene_manager, ProtoPirateSceneSubDecode);
             consumed = true;
         }
         scene_manager_set_scene_state(app->scene_manager, ProtoPirateSceneStart, event.event);

@@ -146,6 +146,14 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
     size_t item_count = ProtoPirateReceiverMenuItemArray_size(model->history_item_arr);
     bool scrollbar = item_count > MENU_ITEMS;
 
+    // Draw EXT/INT indicator in upper right corner
+    canvas_set_font(canvas, FontSecondary);
+    if(model->external_radio) {
+        canvas_draw_str_aligned(canvas, 127, 0, AlignRight, AlignTop, "EXT");
+    } else {
+        canvas_draw_str_aligned(canvas, 127, 0, AlignRight, AlignTop, "INT");
+    }
+
     FuriString* str_buff;
     str_buff = furi_string_alloc();
 
@@ -295,9 +303,9 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
     // Preset
     canvas_draw_str(canvas, 44, 58, furi_string_get_cstr(model->preset_str));
     
-    // History counter
+    // History counter 
     canvas_draw_str_aligned(
-        canvas, 108, 58, AlignCenter, AlignBottom, furi_string_get_cstr(model->history_stat_str));
+        canvas, 98, 58, AlignCenter, AlignBottom, furi_string_get_cstr(model->history_stat_str));
 
     // Draw RSSI indicator with animation
     uint8_t x = 70;
@@ -318,12 +326,7 @@ void protopirate_view_receiver_draw(Canvas* canvas, ProtoPirateReceiverModel* mo
         }
     }
 
-    // External radio indicator
-    if(model->external_radio) {
-        canvas_draw_str(canvas, 116, 58, "E");
-    }
-
-    // Lock indicator
+    // Lock indicator (bottom right, since EXT/INT moved to top)
     if(model->lock == ProtoPirateLockOn) {
         canvas_draw_str(canvas, 122, 58, "L");
     }
