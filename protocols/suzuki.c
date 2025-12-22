@@ -1,4 +1,9 @@
 #include "suzuki.h"
+#include <lib/subghz/blocks/const.h>
+#include <lib/subghz/blocks/decoder.h>
+#include <lib/subghz/blocks/encoder.h>
+#include <lib/subghz/blocks/generic.h>
+#include <lib/subghz/blocks/math.h>
 
 #define TAG "SuzukiProtocol"
 
@@ -25,11 +30,24 @@ typedef struct SubGhzProtocolDecoderSuzuki
     uint16_t header_count;
 } SubGhzProtocolDecoderSuzuki;
 
+typedef enum
+{
+    SuzukiEncoderStepReset = 0,
+    SuzukiEncoderStepPreamble,
+    SuzukiEncoderStepData,
+    SuzukiEncoderStepStop,
+    SuzukiEncoderStepGap,
+} SuzukiEncoderStep;
+
 typedef struct SubGhzProtocolEncoderSuzuki
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    SuzukiEncoderStep step;
+    uint16_t preamble_count;
+    uint8_t data_bit_index;
 } SubGhzProtocolEncoderSuzuki;
 
 typedef enum
@@ -50,18 +68,25 @@ const SubGhzProtocolDecoder subghz_protocol_suzuki_decoder = {
     .get_string = subghz_protocol_decoder_suzuki_get_string,
 };
 
+// Encoder forward declarations
+void *subghz_protocol_encoder_suzuki_alloc(SubGhzEnvironment *environment);
+void subghz_protocol_encoder_suzuki_free(void *context);
+SubGhzProtocolStatus subghz_protocol_encoder_suzuki_deserialize(void *context, FlipperFormat *flipper_format);
+void subghz_protocol_encoder_suzuki_stop(void *context);
+LevelDuration subghz_protocol_encoder_suzuki_yield(void *context);
+
 const SubGhzProtocolEncoder subghz_protocol_suzuki_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_suzuki_alloc,
+    .free = subghz_protocol_encoder_suzuki_free,
+    .deserialize = subghz_protocol_encoder_suzuki_deserialize,
+    .stop = subghz_protocol_encoder_suzuki_stop,
+    .yield = subghz_protocol_encoder_suzuki_yield,
 };
 
 const SubGhzProtocol suzuki_protocol = {
     .name = SUZUKI_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable,
+    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &subghz_protocol_suzuki_decoder,
     .encoder = &subghz_protocol_suzuki_encoder,
 };
@@ -255,7 +280,23 @@ SubGhzProtocolStatus subghz_protocol_decoder_suzuki_deserialize(void *context, F
 {
     furi_assert(context);
     SubGhzProtocolDecoderSuzuki *instance = context;
-    return subghz_block_generic_deserialize(&instance->generic, flipper_format);
+    SubGhzProtocolStatus ret = subghz_block_generic_deserialize(&instance->generic, flipper_format);
+
+    if (ret == SubGhzProtocolStatusOk)
+    {
+        // Manually restore derived fields if they exist in the file
+        uint32_t temp_val;
+        flipper_format_read_uint32(flipper_format, "Serial", &instance->generic.serial, 1);
+        if (flipper_format_read_uint32(flipper_format, "Btn", &temp_val, 1))
+        {
+            instance->generic.btn = temp_val;
+        }
+        if (flipper_format_read_uint32(flipper_format, "Cnt", &temp_val, 1))
+        {
+            instance->generic.cnt = temp_val;
+        }
+    }
+    return ret;
 }
 
 static const char *suzuki_get_button_name(uint8_t btn)
@@ -300,4 +341,109 @@ void subghz_protocol_decoder_suzuki_get_string(void *context, FuriString *output
         suzuki_get_button_name(instance->generic.btn),
         instance->generic.cnt,
         crc);
+}
+
+// Encoder implementation
+void *subghz_protocol_encoder_suzuki_alloc(SubGhzEnvironment *environment)
+{
+    UNUSED(environment);
+    SubGhzProtocolEncoderSuzuki *instance = malloc(sizeof(SubGhzProtocolEncoderSuzuki));
+    instance->base.protocol = &suzuki_protocol;
+    instance->step = SuzukiEncoderStepReset;
+    return instance;
+}
+
+void subghz_protocol_encoder_suzuki_free(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki *instance = context;
+    free(instance);
+}
+
+SubGhzProtocolStatus subghz_protocol_encoder_suzuki_deserialize(void *context, FlipperFormat *flipper_format)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki *instance = context;
+    SubGhzProtocolStatus ret = subghz_block_generic_deserialize(&instance->generic, flipper_format);
+
+    if (ret == SubGhzProtocolStatusOk && instance->generic.data_count_bit != 64)
+    {
+        ret = SubGhzProtocolStatusError;
+    }
+    return ret;
+}
+
+void subghz_protocol_encoder_suzuki_stop(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki *instance = context;
+    instance->step = SuzukiEncoderStepStop;
+}
+
+LevelDuration subghz_protocol_encoder_suzuki_yield(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSuzuki *instance = context;
+
+    uint32_t te_short = subghz_protocol_suzuki_const.te_short;
+    uint32_t te_long = subghz_protocol_suzuki_const.te_long;
+
+    switch (instance->step)
+    {
+    case SuzukiEncoderStepReset:
+        instance->preamble_count = 0;
+        instance->data_bit_index = 0;
+        instance->step = SuzukiEncoderStepPreamble;
+        // fallthrough
+    case SuzukiEncoderStepPreamble:
+        if (instance->preamble_count < 260)
+        { // 130 pairs
+            if (instance->preamble_count % 2 == 0)
+            {
+                instance->preamble_count++;
+                return level_duration_make(true, te_short);
+            }
+            else
+            {
+                instance->preamble_count++;
+                return level_duration_make(false, te_short);
+            }
+        }
+        else
+        {
+            instance->step = SuzukiEncoderStepData;
+        }
+        // fallthrough
+    case SuzukiEncoderStepData:
+        if (instance->data_bit_index < 128)
+        {
+            if (instance->data_bit_index % 2 == 0) {
+                bool bit = (instance->generic.data >> (63 - (instance->data_bit_index / 2))) & 1;
+                instance->data_bit_index++;
+                if (bit)
+                { // 1 = long H
+                    return level_duration_make(true, te_long);
+                }
+                else
+                { // 0 = short H
+                    return level_duration_make(true, te_short);
+                }
+            } else {
+                instance->data_bit_index++;
+                return level_duration_make(false, te_short);
+            }
+        }
+        else
+        {
+            instance->step = SuzukiEncoderStepGap;
+        }
+        // fallthrough
+    case SuzukiEncoderStepGap:
+        instance->step = SuzukiEncoderStepStop;
+        return level_duration_make(false, SUZUKI_GAP_TIME);
+
+    case SuzukiEncoderStepStop:
+        return level_duration_reset();
+    }
+    return level_duration_reset();
 }

@@ -1,4 +1,9 @@
 #include "kia_v5.h"
+#include <lib/subghz/blocks/const.h>
+#include <lib/subghz/blocks/decoder.h>
+#include <lib/subghz/blocks/encoder.h>
+#include <lib/subghz/blocks/generic.h>
+#include <lib/subghz/blocks/math.h>
 
 #define TAG "KiaV5"
 
@@ -20,11 +25,25 @@ struct SubGhzProtocolDecoderKiaV5
     uint16_t raw_bit_count;
 };
 
+typedef enum
+{
+    KiaV5EncoderStepReset = 0,
+    KiaV5EncoderStepPreamble,
+    KiaV5EncoderStepSync,
+    KiaV5EncoderStepData,
+    KiaV5EncoderStepStop,
+} KiaV5EncoderStep;
+
 struct SubGhzProtocolEncoderKiaV5
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    KiaV5EncoderStep step;
+    uint8_t preamble_count;
+    uint8_t data_bit_index;
+    LevelDuration manchester_pulse;
 };
 
 typedef enum
@@ -45,18 +64,25 @@ const SubGhzProtocolDecoder kia_protocol_v5_decoder = {
     .get_string = kia_protocol_decoder_v5_get_string,
 };
 
+// Encoder forward declarations
+void *kia_protocol_encoder_v5_alloc(SubGhzEnvironment *environment);
+void kia_protocol_encoder_v5_free(void *context);
+SubGhzProtocolStatus kia_protocol_encoder_v5_deserialize(void *context, FlipperFormat *flipper_format);
+void kia_protocol_encoder_v5_stop(void *context);
+LevelDuration kia_protocol_encoder_v5_yield(void *context);
+
 const SubGhzProtocolEncoder kia_protocol_v5_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = kia_protocol_encoder_v5_alloc,
+    .free = kia_protocol_encoder_v5_free,
+    .deserialize = kia_protocol_encoder_v5_deserialize,
+    .stop = kia_protocol_encoder_v5_stop,
+    .yield = kia_protocol_encoder_v5_yield,
 };
 
 const SubGhzProtocol kia_protocol_v5 = {
     .name = KIA_PROTOCOL_V5_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable,
+    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &kia_protocol_v5_decoder,
     .encoder = &kia_protocol_v5_encoder,
 };
@@ -339,8 +365,22 @@ kia_protocol_decoder_v5_deserialize(void *context, FlipperFormat *flipper_format
 {
     furi_assert(context);
     SubGhzProtocolDecoderKiaV5 *instance = context;
-    return subghz_block_generic_deserialize_check_count_bit(
+    SubGhzProtocolStatus ret = subghz_block_generic_deserialize_check_count_bit(
         &instance->generic, flipper_format, kia_protocol_v5_const.min_count_bit_for_found);
+
+    if (ret == SubGhzProtocolStatusOk)
+    {
+        uint32_t temp_val;
+        if (flipper_format_read_uint32(flipper_format, "DataHi", &temp_val, 1))
+        {
+            instance->generic.data = ((uint64_t)temp_val << 32);
+        }
+        if (flipper_format_read_uint32(flipper_format, "DataLo", &temp_val, 1))
+        {
+            instance->generic.data |= temp_val;
+        }
+    }
+    return ret;
 }
 
 void kia_protocol_decoder_v5_get_string(void *context, FuriString *output)
@@ -363,4 +403,129 @@ void kia_protocol_decoder_v5_get_string(void *context, FuriString *output)
         instance->generic.serial,
         instance->generic.btn,
         instance->generic.cnt);
+}
+
+// Encoder implementation
+void *kia_protocol_encoder_v5_alloc(SubGhzEnvironment *environment)
+{
+    UNUSED(environment);
+    SubGhzProtocolEncoderKiaV5 *instance = malloc(sizeof(SubGhzProtocolEncoderKiaV5));
+    instance->base.protocol = &kia_protocol_v5;
+    instance->step = KiaV5EncoderStepReset;
+    return instance;
+}
+
+void kia_protocol_encoder_v5_free(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV5 *instance = context;
+    free(instance);
+}
+
+SubGhzProtocolStatus kia_protocol_encoder_v5_deserialize(void *context, FlipperFormat *flipper_format)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV5 *instance = context;
+    SubGhzProtocolStatus ret = subghz_block_generic_deserialize_check_count_bit(
+        &instance->generic, flipper_format, kia_protocol_v5_const.min_count_bit_for_found);
+
+    if (ret == SubGhzProtocolStatusOk)
+    {
+        uint32_t temp_val;
+        // Restore raw data for exact replay
+        if (flipper_format_read_uint32(flipper_format, "DataHi", &temp_val, 1))
+        {
+            instance->generic.data = ((uint64_t)temp_val << 32);
+        }
+        if (flipper_format_read_uint32(flipper_format, "DataLo", &temp_val, 1))
+        {
+            instance->generic.data |= temp_val;
+        }
+    }
+
+    if (ret == SubGhzProtocolStatusOk)
+    {
+        instance->step = KiaV5EncoderStepPreamble;
+    }
+
+    return ret;
+}
+
+void kia_protocol_encoder_v5_stop(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV5 *instance = context;
+    instance->step = KiaV5EncoderStepStop;
+}
+
+LevelDuration kia_protocol_encoder_v5_yield(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderKiaV5 *instance = context;
+
+    uint32_t te_short = kia_protocol_v5_const.te_short;
+    uint32_t te_long = kia_protocol_v5_const.te_long;
+
+    switch (instance->step)
+    {
+    case KiaV5EncoderStepReset:
+        instance->preamble_count = 0;
+        instance->data_bit_index = 0;
+        instance->manchester_pulse.duration = 0;
+        instance->step = KiaV5EncoderStepPreamble;
+        // fallthrough
+    case KiaV5EncoderStepPreamble:
+        if (instance->preamble_count < 84)
+        { // 42 pairs
+            if (instance->preamble_count % 2 == 0)
+            {
+                instance->preamble_count++;
+                return level_duration_make(true, te_short);
+            }
+            else
+            {
+                instance->preamble_count++;
+                return level_duration_make(false, te_short);
+            }
+        }
+        else
+        {
+            instance->step = KiaV5EncoderStepSync;
+        }
+        // fallthrough
+    case KiaV5EncoderStepSync:
+        instance->step = KiaV5EncoderStepData;
+        return level_duration_make(false, te_long);
+
+    case KiaV5EncoderStepData:
+        if (instance->manchester_pulse.duration > 0)
+        {
+            LevelDuration pulse = instance->manchester_pulse;
+            instance->manchester_pulse.duration = 0;
+            return pulse;
+        }
+        if (instance->data_bit_index < 64)
+        {
+            bool bit = (instance->generic.data >> (63 - instance->data_bit_index)) & 1;
+            instance->data_bit_index++;
+            if (bit)
+            { // 1 -> 01
+                instance->manchester_pulse = level_duration_make(true, te_short);
+                return level_duration_make(false, te_short);
+            }
+            else
+            { // 0 -> 10
+                instance->manchester_pulse = level_duration_make(false, te_short);
+                return level_duration_make(true, te_short);
+            }
+        }
+        else
+        {
+            instance->step = KiaV5EncoderStepStop;
+        }
+        // fallthrough
+    case KiaV5EncoderStepStop:
+        return level_duration_reset();
+    }
+    return level_duration_reset();
 }

@@ -1,4 +1,9 @@
 #include "subaru.h"
+#include <lib/subghz/blocks/const.h>
+#include <lib/subghz/blocks/decoder.h>
+#include <lib/subghz/blocks/encoder.h>
+#include <lib/subghz/blocks/generic.h>
+#include <lib/subghz/blocks/math.h>
 
 #define TAG "SubaruProtocol"
 
@@ -25,11 +30,25 @@ typedef struct SubGhzProtocolDecoderSubaru
     uint16_t count;
 } SubGhzProtocolDecoderSubaru;
 
+typedef enum
+{
+    SubaruEncoderStepReset = 0,
+    SubaruEncoderStepPreamble,
+    SubaruEncoderStepGap,
+    SubaruEncoderStepSync,
+    SubaruEncoderStepData,
+    SubaruEncoderStepStop,
+} SubaruEncoderStep;
+
 typedef struct SubGhzProtocolEncoderSubaru
 {
     SubGhzProtocolEncoderBase base;
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
+
+    SubaruEncoderStep step;
+    uint8_t preamble_count;
+    uint8_t data_bit_index;
 } SubGhzProtocolEncoderSubaru;
 
 typedef enum
@@ -53,18 +72,26 @@ const SubGhzProtocolDecoder subghz_protocol_subaru_decoder = {
     .get_string = subghz_protocol_decoder_subaru_get_string,
 };
 
+// Encoder forward declarations
+void *subghz_protocol_encoder_subaru_alloc(SubGhzEnvironment *environment);
+void subghz_protocol_encoder_subaru_free(void *context);
+SubGhzProtocolStatus subghz_protocol_encoder_subaru_deserialize(void *context, FlipperFormat *flipper_format);
+void subghz_protocol_encoder_subaru_stop(void *context);
+LevelDuration subghz_protocol_encoder_subaru_yield(void *context);
+static void subaru_encode_count(const uint32_t serial, const uint16_t count, uint8_t *out_bytes);
+
 const SubGhzProtocolEncoder subghz_protocol_subaru_encoder = {
-    .alloc = NULL,
-    .free = NULL,
-    .deserialize = NULL,
-    .stop = NULL,
-    .yield = NULL,
+    .alloc = subghz_protocol_encoder_subaru_alloc,
+    .free = subghz_protocol_encoder_subaru_free,
+    .deserialize = subghz_protocol_encoder_subaru_deserialize,
+    .stop = subghz_protocol_encoder_subaru_stop,
+    .yield = subghz_protocol_encoder_subaru_yield,
 };
 
 const SubGhzProtocol subaru_protocol = {
     .name = SUBARU_PROTOCOL_NAME,
     .type = SubGhzProtocolTypeDynamic,
-    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable,
+    .flag = SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Send,
     .decoder = &subghz_protocol_subaru_decoder,
     .encoder = &subghz_protocol_subaru_encoder,
 };
@@ -136,6 +163,81 @@ static void subaru_decode_count(const uint8_t *KB, uint16_t *count)
         hi |= 0x10;
 
     *count = ((hi << 8) | lo) & 0xFFFF;
+}
+
+static void subaru_encode_count(const uint32_t serial, const uint16_t count, uint8_t *out_bytes)
+{
+    uint8_t lo = count & 0xFF;
+    uint8_t hi = (count >> 8) & 0xFF;
+
+    uint8_t T1 = 0, T2 = 0;
+    if ((hi & 0x04) == 0)
+        T1 |= 0x10;
+    if ((hi & 0x08) == 0)
+        T1 |= 0x20;
+    if ((hi & 0x02) == 0)
+        T2 |= 0x80;
+    if ((hi & 0x01) == 0)
+        T2 |= 0x40;
+    if ((hi & 0x40) == 0)
+        T1 |= 0x01;
+    if ((hi & 0x80) == 0)
+        T1 |= 0x02;
+    if ((hi & 0x20) == 0)
+        T2 |= 0x08;
+    if ((hi & 0x10) == 0)
+        T2 |= 0x04;
+
+    uint8_t SER0_enc = (serial >> 0) & 0xFF;
+    uint8_t SER1_enc = (serial >> 16) & 0xFF;
+    uint8_t SER2_enc = (serial >> 8) & 0xFF;
+
+    uint8_t total_rot = 4 + lo;
+    for (uint8_t i = 0; i < total_rot; ++i)
+    {
+        uint8_t t_bit = SER2_enc & 1;
+        SER2_enc = (SER2_enc >> 1) | ((SER1_enc & 1) << 7);
+        SER1_enc = (SER1_enc >> 1) | ((SER0_enc & 1) << 7);
+        SER0_enc = (SER0_enc >> 1) | (t_bit << 7);
+    }
+
+    uint8_t REG_SH1_enc = T1 ^ SER1_enc;
+    uint8_t REG_SH2_enc = T2 ^ SER2_enc;
+
+    out_bytes[4] = 0;
+    out_bytes[5] = 0;
+    out_bytes[6] = 0;
+    out_bytes[7] = 0;
+
+    if ((lo & 0x01) == 0)
+        out_bytes[4] |= 0x40;
+    if ((lo & 0x02) == 0)
+        out_bytes[4] |= 0x80;
+    if ((lo & 0x04) == 0)
+        out_bytes[5] |= 0x01;
+    if ((lo & 0x08) == 0)
+        out_bytes[5] |= 0x02;
+    if ((lo & 0x10) == 0)
+        out_bytes[6] |= 0x01;
+    if ((lo & 0x20) == 0)
+        out_bytes[6] |= 0x02;
+    if ((lo & 0x40) == 0)
+        out_bytes[5] |= 0x40;
+    if ((lo & 0x80) == 0)
+        out_bytes[5] |= 0x80;
+
+    if (REG_SH1_enc & 0x04)
+        out_bytes[5] |= 0x04;
+    if (REG_SH1_enc & 0x08)
+        out_bytes[5] |= 0x08;
+    if (REG_SH1_enc & 0x02)
+        out_bytes[6] |= 0x80;
+    if (REG_SH1_enc & 0x01)
+        out_bytes[6] |= 0x40;
+
+    out_bytes[6] |= (REG_SH2_enc & 0xF0) >> 2;
+    out_bytes[7] |= (REG_SH1_enc & 0xF0) >> 4;
+    out_bytes[7] |= (REG_SH2_enc & 0x0F) << 4;
 }
 
 static void subaru_add_bit(SubGhzProtocolDecoderSubaru *instance, bool bit)
@@ -421,8 +523,23 @@ SubGhzProtocolStatus subghz_protocol_decoder_subaru_deserialize(void *context, F
 {
     furi_assert(context);
     SubGhzProtocolDecoderSubaru *instance = context;
-    return subghz_block_generic_deserialize_check_count_bit(
+    SubGhzProtocolStatus ret = subghz_block_generic_deserialize_check_count_bit(
         &instance->generic, flipper_format, subghz_protocol_subaru_const.min_count_bit_for_found);
+
+    if (ret == SubGhzProtocolStatusOk)
+    {
+        uint32_t temp_val;
+        if (flipper_format_read_uint32(flipper_format, "DataHi", &temp_val, 1))
+        {
+            instance->key = ((uint64_t)temp_val << 32);
+        }
+        if (flipper_format_read_uint32(flipper_format, "DataLo", &temp_val, 1))
+        {
+            instance->key |= temp_val;
+            instance->generic.data = instance->key; // Keep data in sync
+        }
+    }
+    return ret;
 }
 
 void subghz_protocol_decoder_subaru_get_string(void *context, FuriString *output)
@@ -445,4 +562,143 @@ void subghz_protocol_decoder_subaru_get_string(void *context, FuriString *output
         instance->serial,
         instance->button,
         instance->count);
+}
+
+// Encoder implementation
+void *subghz_protocol_encoder_subaru_alloc(SubGhzEnvironment *environment)
+{
+    UNUSED(environment);
+    SubGhzProtocolEncoderSubaru *instance = malloc(sizeof(SubGhzProtocolEncoderSubaru));
+    instance->base.protocol = &subaru_protocol;
+    instance->step = SubaruEncoderStepReset;
+    return instance;
+}
+
+void subghz_protocol_encoder_subaru_free(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru *instance = context;
+    free(instance);
+}
+
+SubGhzProtocolStatus subghz_protocol_encoder_subaru_deserialize(void *context, FlipperFormat *flipper_format)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru *instance = context;
+    SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
+
+    if (subghz_block_generic_deserialize_check_count_bit(
+            &instance->generic, flipper_format, subghz_protocol_subaru_const.min_count_bit_for_found))
+    {
+        uint32_t temp_val;
+        if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->generic.serial, 1))
+            return SubGhzProtocolStatusError;
+        if (!flipper_format_read_uint32(flipper_format, "Btn", &temp_val, 1))
+            return SubGhzProtocolStatusError;
+        instance->generic.btn = temp_val;
+        if (!flipper_format_read_uint32(flipper_format, "Cnt", &temp_val, 1))
+            return SubGhzProtocolStatusError;
+        instance->generic.cnt = temp_val;
+
+        uint8_t b[8] = {0};
+        b[0] = instance->generic.btn;
+        b[1] = (instance->generic.serial >> 16) & 0xFF;
+        b[2] = (instance->generic.serial >> 8) & 0xFF;
+        b[3] = instance->generic.serial & 0xFF;
+
+        uint8_t count_bytes[4] = {0};
+        subaru_encode_count(instance->generic.serial, instance->generic.cnt, count_bytes);
+        b[4] = count_bytes[0];
+        b[5] = count_bytes[1];
+        b[6] = count_bytes[2];
+        b[7] = count_bytes[3];
+
+        instance->generic.data = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            instance->generic.data |= ((uint64_t)b[i] << (56 - (i * 8)));
+        }
+        ret = SubGhzProtocolStatusOk;
+    }
+    return ret;
+}
+
+void subghz_protocol_encoder_subaru_stop(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru *instance = context;
+    instance->step = SubaruEncoderStepStop;
+}
+
+LevelDuration subghz_protocol_encoder_subaru_yield(void *context)
+{
+    furi_assert(context);
+    SubGhzProtocolEncoderSubaru *instance = context;
+
+    uint32_t te_short = subghz_protocol_subaru_const.te_short;
+    uint32_t te_long = subghz_protocol_subaru_const.te_long;
+    uint32_t gap_val = 2750;
+
+    switch (instance->step)
+    {
+    case SubaruEncoderStepReset:
+        instance->preamble_count = 0;
+        instance->data_bit_index = 0;
+        instance->step = SubaruEncoderStepPreamble;
+        // fallthrough
+    case SubaruEncoderStepPreamble:
+        if (instance->preamble_count < 50)
+        { // 25 pairs
+            if (instance->preamble_count % 2 == 0)
+            {
+                instance->preamble_count++;
+                return level_duration_make(true, te_long);
+            }
+            else
+            {
+                instance->preamble_count++;
+                return level_duration_make(false, te_long);
+            }
+        }
+        else
+        {
+            instance->step = SubaruEncoderStepGap;
+        }
+        // fallthrough
+    case SubaruEncoderStepGap:
+        instance->step = SubaruEncoderStepSync;
+        return level_duration_make(false, gap_val);
+
+    case SubaruEncoderStepSync:
+        instance->step = SubaruEncoderStepData;
+        return level_duration_make(true, gap_val);
+
+    case SubaruEncoderStepData:
+        if (instance->data_bit_index < 128)
+        {
+            if (instance->data_bit_index % 2 == 0) {
+                bool bit = (instance->generic.data >> (63 - (instance->data_bit_index / 2))) & 1;
+                instance->data_bit_index++;
+                if (bit)
+                { // 1 = short H
+                    return level_duration_make(true, te_short);
+                }
+                else
+                { // 0 = long H
+                    return level_duration_make(true, te_long);
+                }
+            } else {
+                instance->data_bit_index++;
+                return level_duration_make(false, te_short);
+            }
+        }
+        else
+        {
+            instance->step = SubaruEncoderStepStop;
+        }
+        // fallthrough
+    case SubaruEncoderStepStop:
+        return level_duration_reset();
+    }
+    return level_duration_reset();
 }
