@@ -66,3 +66,11 @@ Join **The Pirates' Plunder** on Discord for development updates, testing, proto
 ➡️ **[https://discord.gg/thepirates](https://discord.gg/thepirates)**
 
 <img width="1500" height="1000" alt="rocketgod_logo_transparent" src="https://github.com/user-attachments/assets/ad15b106-152c-4a60-a9e2-4d40dfa8f3c6" />
+
+---
+
+## **Development Reference**
+
+The `reference/` directory contains code and data that may be useful for future development of encoders.
+
+**IMPORTANT:** The C code in this directory is **not functional** and should not be integrated into the application without significant modification. It contains a flawed Keeloq implementation that is missing the necessary key derivation step. The manufacturer keys and protocol structures may still be useful as a starting point for a correct implementation.
