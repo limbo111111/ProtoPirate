@@ -1,0 +1,251 @@
+{
+    "cars": [
+        {
+            "brand": "Volkswagen",
+            "model": "Golf 8",
+            "protocol": "Megamos",
+            "mf_code": "0x1A2B3C4D5E6F7A8B",
+            "hop_codes": ["0x9B3C2A1D", "0x8A2B1C9D", "0x7B9C0D1E", "0x6C0D1E2F", "0x5D1E2F3A", "0x4E2F3A4B", "0x3F3A4B5C", "0x204B5C6D", "0x115C6D7E", "0x026D7E8F", "0xF37E8F9A", "0xE48F9A0B", "0xD59A0B1C", "0xC60B1C2D", "0xB71C2D3E", "0xA82D3E4F", "0x993E4F5A", "0x8A4F5A6B"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "BMW",
+            "model": "iX",
+            "protocol": "Hitag3",
+            "mf_code": "0x4D5E6F7A8B9C0D1E",
+            "hop_codes": ["0x5A6B7C8D", "0x4B7C8D9E", "0x3C8D9E0A", "0x2D9E0A1B", "0x1E0A1B2C", "0x0F1B2C3D", "0xE02C3D4E", "0xD13D4E5F", "0xC24E5F6A", "0xB35F6A7B", "0xA46A7B8C", "0x957B8C9D", "0x868C9D0E", "0x779D0E1F", "0x68A0E1F2", "0x59B1F2A3"],
+            "frequency": 315000000,
+            "modulation": "ASK"
+        },
+        {
+            "brand": "Mercedes",
+            "model": "S-Class",
+            "protocol": "AES",
+            "mf_code": "0x9C0D1E2F3A4B5C6D",
+            "hop_codes": ["0x7A8B9C0D", "0x6B9C0D1E", "0x5C0D1E2F", "0x4D1E2F3A", "0x3E2F3A4B", "0x2F3A4B5C", "0x103A4B5C", "0x014B5C6D", "0xF25C6D7E", "0xE36D7E8F", "0xD47E8F9A", "0xC58F9A0B", "0xB69A0B1C", "0xA70B1C2D", "0x981C2D3E", "0x892D3E4F", "0x7A3E4F5A", "0x6B4F5A6B", "0x5C5A6B7C", "0x4D6B7C8D", "0x3E7C8D9E", "0x2F8D9E0A"],
+            "frequency": 433920000,
+            "modulation": "FSK",
+            "aes_key": "9C0D1E2F3A4B5C6DAD1E2F3A4B5C6D7E"
+        },
+        {
+            "brand": "Ford",
+            "model": "Mustang",
+            "protocol": "DST+",
+            "mf_code": "0x1E2F3A4B5C6D7E8F",
+            "hop_codes": ["0x8B9C0D1E", "0x7C0D1E2F", "0x6D1E2F3A", "0x5E2F3A4B", "0x4F3A4B5C", "0x303A4B5C", "0x214B5C6D", "0x125C6D7E", "0xF36D7E8F", "0xE47E8F9A", "0xD58F9A0B", "0xC69A0B1C", "0xB70B1C2D", "0xA81C2D3E", "0x992D3E4F"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Toyota",
+            "model": "RAV4",
+            "protocol": "Hitag2",
+            "mf_code": "0x3A4B5C6D7E8F9A0B",
+            "hop_codes": ["0x9C0D1E2F", "0x8D1E2F3A", "0x7E2F3A4B", "0x6F3A4B5C", "0x503A4B5C", "0x414B5C6D", "0x325C6D7E", "0x236D7E8F", "0x147E8F9A", "0xF58F9A0B", "0xE69A0B1C", "0xD70B1C2D", "0xC81C2D3E", "0xB92D3E4F", "0xAA3E4F5A", "0x9B4F5A6B", "0x8C5A6B7C"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Honda",
+            "model": "CR-V",
+            "protocol": "Megamos",
+            "mf_code": "0x5C6D7E8F9A0B1C2D",
+            "hop_codes": ["0xA0B1C2D3", "0x91B2C3D4", "0x82C3D4E5", "0x73D4E5F6", "0x64E5F6A7", "0x55F6A7B8", "0x46A7B8C9", "0x37B8C9DA", "0x28C9DAEB", "0x19DAEBFC", "0x0AEBFC0D", "0xFBFC0D1E", "0xEC0D1E2F", "0xDD1E2F3A"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Nissan",
+            "model": "Leaf",
+            "protocol": "DST",
+            "mf_code": "0x7E8F9A0B1C2D3E4F",
+            "hop_codes": ["0xB1C2D3E4", "0xA2C3D4E5", "0x93D4E5F6", "0x84E5F6A7", "0x75F6A7B8", "0x66A7B8C9", "0x57B8C9DA", "0x48C9DAEB", "0x39DAEBFC", "0x2AEBFC0D", "0x1BFC0D1E", "0x0C0D1E2F", "0xFD1E2F3A"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Audi",
+            "model": "Q5",
+            "protocol": "Megamos",
+            "mf_code": "0x9A0B1C2D3E4F5A6B",
+            "hop_codes": ["0xC2D3E4F5", "0xB3D4E5F6", "0xA4E5F6A7", "0x95F6A7B8", "0x86A7B8C9", "0x77B8C9DA", "0x68C9DAEB", "0x59DAEBFC", "0x4AEBFC0D", "0x3BFC0D1E", "0x2C0D1E2F", "0x1D1E2F3A", "0x0E2F3A4B", "0xFF3A4B5C", "0xE04B5C6D", "0xD15C6D7E"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Seat",
+            "model": "Ateca",
+            "protocol": "Hitag",
+            "mf_code": "0xB1C2D3E4F5A6B7C8D",
+            "hop_codes": ["0xD3E4F5A6", "0xC4E5F6A7", "0xB5F6A7B8", "0xA6A7B8C9", "0x97B8C9DA", "0x88C9DAEB", "0x79DAEBFC", "0x6AEBFC0D", "0x5BFC0D1E", "0x4C0D1E2F", "0x3D1E2F3A", "0x2E2F3A4B"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Skoda",
+            "model": "Kodiaq",
+            "protocol": "Megamos",
+            "mf_code": "0xC2D3E4F5A6B7C8D9E",
+            "hop_codes": ["0xE4F5A6B7", "0xD5F6A7B8", "0xC6A7B8C9", "0xB7B8C9DA", "0xA8C9DAEB", "0x99DAEBFC", "0x8AEBFC0D", "0x7BFC0D1E", "0x6C0D1E2F", "0x5D1E2F3A", "0x4E2F3A4B", "0x3F3A4B5C", "0x203A4B5C", "0x114B5C6D", "0x025C6D7E"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Volvo",
+            "model": "XC90",
+            "protocol": "DST+",
+            "mf_code": "0xD3E4F5A6B7C8D9E0F",
+            "hop_codes": ["0xF5A6B7C8", "0xE6A7B8C9", "0xD7B8C9DA", "0xC8C9DAEB", "0xB9DAEBFC", "0xAAEBFC0D", "0x9BFC0D1E", "0x8C0D1E2F", "0x7D1E2F3A", "0x6E2F3A4B", "0x5F3A4B5C", "0x403A4B5C", "0x314B5C6D", "0x225C6D7E"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Porsche",
+            "model": "Taycan",
+            "protocol": "AES",
+            "mf_code": "0xE4F5A6B7C8D9E0F1A",
+            "hop_codes": ["0x06B7C8D9", "0xF7A7B8C9", "0xE8B8C9DA", "0xD9C9DAEB", "0xCADAEBFC", "0xBBEBFC0D", "0xACFC0D1E", "0x9D0D1E2F", "0x8E1E2F3A", "0x7F2F3A4B", "0x603A4B5C", "0x514B5C6D", "0x425C6D7E"],
+            "frequency": 433920000,
+            "modulation": "FSK",
+            "aes_key": "E4F5A6B7C8D9E0F1ACF3A4B5C6D7E8F9A"
+        },
+        {
+            "brand": "Tesla",
+            "model": "Model 3",
+            "protocol": "AES",
+            "mf_code": "0x4D5E6F7A8B9C0D1E",
+            "hop_codes": ["0x5A6B7C8D", "0x4B7C8D9E", "0x3C8D9E0A", "0x2D9E0A1B", "0x1E0A1B2C", "0x0F1B2C3D", "0xE02C3D4E", "0xD13D4E5F", "0xC24E5F6A", "0xB35F6A7B", "0xA46A7B8C", "0x957B8C9D", "0x868C9D0E", "0x779D0E1F", "0x68A0E1F2", "0x59B1F2A3", "0x4AC2D3E4", "0x3BD3E4F5", "0x2CE4F5A6", "0x1DF5A6B7"],
+            "frequency": 433920000,
+            "modulation": "FSK",
+            "aes_key": "4D5E6F7A8B9C0D1EBE2F3A4B5C6D7E8F"
+        },
+        {
+            "brand": "Jaguar",
+            "model": "I-PACE",
+            "protocol": "Hitag3",
+            "mf_code": "0xF5A6B7C8D9E0F1A2B",
+            "hop_codes": ["0x17C8D9E0", "0x08A7B8C9", "0xF9B8C9DA", "0xEAC9DAEB", "0xDBDAEBFC", "0xCCEBFC0D", "0xBDFC0D1E", "0xAE0D1E2F", "0x9F1E2F3A", "0x802F3A4B", "0x713A4B5C", "0x624B5C6D", "0x535C6D7E", "0x446D7E8F"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Land Rover",
+            "model": "Defender",
+            "protocol": "Megamos",
+            "mf_code": "0x06B7C8D9E0F1A2B3C",
+            "hop_codes": ["0x28D9E0F1", "0x19A7B8C9", "0x0AB8C9DA", "0xFBC9DAEB", "0xECDAEBFC", "0xDDEBFC0D", "0xCEFC0D1E", "0xBF0D1E2F", "0xA01E2F3A", "0x912F3A4B", "0x823A4B5C", "0x734B5C6D", "0x645C6D7E", "0x556D7E8F", "0x467E8F9A", "0x378F9A0B"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Renault",
+            "model": "Clio",
+            "protocol": "DST",
+            "mf_code": "0x17C8D9E0F1A2B3C4D",
+            "hop_codes": ["0x39E0F1A2", "0x2AF1A2B3", "0x1BA2B3C4", "0x0CB3C4D5", "0xFDC4D5E6", "0xEED5E6F7", "0xDFE6F7A8", "0xC0F7A8B9", "0xB1A8B9CA", "0xA2B9CADB", "0x93CADBEC", "0x84DBECFD"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Peugeot",
+            "model": "3008",
+            "protocol": "Hitag",
+            "mf_code": "0x28D9E0F1A2B3C4D5E",
+            "hop_codes": ["0x4A0F1A2B", "0x3B1A2B3C", "0x2C2B3C4D", "0x1D3C4D5E", "0x0E4D5E6F", "0xFF5E6F7A", "0xE06F7A8B", "0xD17A8B9C", "0xC28B9CAD", "0xB39CADBE", "0xA4ADBECF", "0x95BECFD0", "0x86CFD0E1"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Opel",
+            "model": "Corsa",
+            "protocol": "Megamos",
+            "mf_code": "0x39E0F1A2B3C4D5E6F",
+            "hop_codes": ["0x5B1A2B3C", "0x4C2B3C4D", "0x3D3C4D5E", "0x2E4D5E6F", "0x1F5E6F7A", "0x006F7A8B", "0xF17A8B9C", "0xE28B9CAD", "0xD39CADBE", "0xC4ADBECF", "0xB5BECFD0", "0xA6CFD0E1"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Fiat",
+            "model": "500",
+            "protocol": "DST",
+            "mf_code": "0x4A0F1A2B3C4D5E6F",
+            "hop_codes": ["0x6C2B3C4D", "0x5D3C4D5E", "0x4E4D5E6F", "0x3F5E6F7A", "0x206F7A8B", "0x117A8B9C", "0x028B9CAD", "0xF39CADBE", "0xE4ADBECF", "0xD5BECFD0"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Hyundai",
+            "model": "Tucson",
+            "protocol": "Hitag2",
+            "mf_code": "0x5B1A2B3C4D5E6F7A",
+            "hop_codes": ["0x7D3C4D5E", "0x6E4D5E6F", "0x5F5E6F7A", "0x406F7A8B", "0x317A8B9C", "0x228B9CAD", "0x139CADBE", "0x04ADBECF", "0xF5BECFD0", "0xE6CFD0E1", "0xD7D0E1F2", "0xC8E1F2A3", "0xB9F2A3B4"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Kia",
+            "model": "Sportage",
+            "protocol": "Megamos",
+            "mf_code": "0x6C2B3C4D5E6F7A8B",
+            "hop_codes": ["0x8E4D5E6F", "0x7F5E6F7A", "0x606F7A8B", "0x517A8B9C", "0x428B9CAD", "0x339CADBE", "0x24ADBECF", "0x15BECFD0", "0xF6CFD0E1", "0xE7D0E1F2", "0xD8E1F2A3", "0xC9F2A3B4"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Chevrolet",
+            "model": "Bolt",
+            "protocol": "DST",
+            "mf_code": "0x7D3C4D5E6F7A8B9C",
+            "hop_codes": ["0x9F5E6F7A", "0x806F7A8B", "0x717A8B9C", "0x628B9CAD", "0x539CADBE", "0x44ADBECF", "0x35BECFD0", "0x26CFD0E1", "0x17D0E1F2", "0xF8E1F2A3"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Jeep",
+            "model": "Wrangler",
+            "protocol": "Hitag",
+            "mf_code": "0x8E4D5E6F7A8B9C0D",
+            "hop_codes": ["0xB06F7A8B", "0xA17A8B9C", "0x928B9CAD", "0x839CADBE", "0x74ADBECF", "0x65BECFD0", "0x56CFD0E1", "0x47D0E1F2", "0x38E1F2A3"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Mazda",
+            "model": "CX-5",
+            "protocol": "Megamos",
+            "mf_code": "0x9F5E6F7A8B9C0D1E",
+            "hop_codes": ["0xC17A8B9C", "0xB28B9CAD", "0xA39CADBE", "0x94ADBECF", "0x85BECFD0", "0x76CFD0E1", "0x67D0E1F2", "0x58E1F2A3", "0x49F2A3B4", "0x3AA3B4C5", "0x2BB4C5D6", "0x1CC5D6E7"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Mitsubishi",
+            "model": "Outlander",
+            "protocol": "DST",
+            "mf_code": "0xB06F7A8B9C0D1E2F",
+            "hop_codes": ["0xD28B9CAD", "0xC39CADBE", "0xB4ADBECF", "0xA5BECFD0", "0x96CFD0E1", "0x87D0E1F2", "0x78E1F2A3", "0x69F2A3B4", "0x5AA3B4C5", "0x4BB4C5D6"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Subaru",
+            "model": "Forester",
+            "protocol": "Hitag2",
+            "mf_code": "0xC17A8B9C0D1E2F3A",
+            "hop_codes": ["0xE39CADBE", "0xD4ADBECF", "0xC5BECFD0", "0xB6CFD0E1", "0xA7D0E1F2", "0x98E1F2A3", "0x89F2A3B4", "0x7AA3B4C5", "0x6BB4C5D6"],
+            "frequency": 433920000,
+            "modulation": "FSK"
+        },
+        {
+            "brand": "Lexus",
+            "model": "RX",
+            "protocol": "AES",
+            "mf_code": "0xD28B9CAD0D1E2F3A",
+            "hop_codes": ["0xF4ADBECF", "0xE5BECFD0", "0xD6CFD0E1", "0xC7D0E1F2", "0xB8E1F2A3", "0xA9F2A3B4", "0x9AA3B4C5", "0x8BB4C5D6", "0x7CC5D6E7", "0x6DD6E7F8", "0x5EE7F8A9", "0x4FF8A9BA", "0x30A9BACB"],
+            "frequency": 433920000,
+            "modulation": "FSK",
+            "aes_key": "D28B9CAD0D1E2F3AE1F2A3B4C5D6E7F8"
+        }
+    ]
+}
