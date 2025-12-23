@@ -1,4 +1,5 @@
 #include "kia_v3_v4.h"
+#include "manufacturer_keys.h"
 #include <lib/subghz/blocks/const.h>
 #include <lib/subghz/blocks/decoder.h>
 #include <lib/subghz/blocks/encoder.h>
@@ -7,7 +8,6 @@
 
 #define TAG "KiaV3V4"
 
-static const uint64_t kia_mf_key = 0xA8F5DFFC8DAA5CDB;
 static const char *kia_version_names[] = {"Kia V4", "Kia V3"};
 
 static const SubGhzBlockConst kia_protocol_v3_v4_const = {
@@ -157,7 +157,7 @@ static bool kia_v3_v4_process_buffer(SubGhzProtocolDecoderKiaV3V4 *instance)
     uint8_t our_serial_lsb = serial & 0xFF;
 
     // Decrypt
-    uint32_t decrypted = keeloq_common_decrypt(encrypted, kia_mf_key);
+    uint32_t decrypted = keeloq_common_decrypt(encrypted, MANUFACTURER_KEY_KIA_V3_V4);
     uint8_t dec_btn = (decrypted >> 28) & 0x0F;
     uint8_t dec_serial_lsb = (decrypted >> 16) & 0xFF;
 
@@ -463,7 +463,7 @@ static void subghz_protocol_kia_v3_v4_encrypt_and_assemble(SubGhzProtocolEncoder
         ((instance->generic.serial & 0xFF) << 16) |
         instance->generic.cnt;
 
-    uint32_t encrypted = keeloq_common_encrypt(decrypted, kia_mf_key);
+    uint32_t encrypted = keeloq_common_encrypt(decrypted, MANUFACTURER_KEY_KIA_V3_V4);
 
     uint8_t b[8] = {0};
     b[0] = reverse8((uint8_t)(encrypted & 0xFF));

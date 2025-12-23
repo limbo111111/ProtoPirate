@@ -11,6 +11,11 @@ typedef struct {
     uint64_t key;           /**< The 64-bit manufacturer key */
 } ManufacturerKey;
 
+// Known Keys Constants
+#define MANUFACTURER_KEY_KIA_V3_V4          0xA8F5DFFC8DAA5CDBULL
+#define MANUFACTURER_KEY_SIMPLE_LEARNING    0x123456789ABCDEF0ULL
+#define MANUFACTURER_KEY_NORMAL_LEARNING    0x0123456789ABCDEFULL
+
 /**
  * @brief List of known manufacturer keys (Blacklist).
  *
