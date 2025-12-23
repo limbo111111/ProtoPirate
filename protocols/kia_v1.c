@@ -449,6 +449,7 @@ void *kia_protocol_encoder_v1_alloc(SubGhzEnvironment *environment)
 {
     UNUSED(environment);
     SubGhzProtocolEncoderKiaV1 *instance = malloc(sizeof(SubGhzProtocolEncoderKiaV1));
+    memset(instance, 0, sizeof(SubGhzProtocolEncoderKiaV1));
     instance->base.protocol = &kia_protocol_v1;
     instance->step = KiaV1EncoderStepReset;
     return instance;
@@ -476,7 +477,7 @@ SubGhzProtocolStatus kia_protocol_encoder_v1_deserialize(void *context, FlipperF
 
     if (ret == SubGhzProtocolStatusOk)
     {
-        instance->step = KiaV1EncoderStepPreamble;
+        instance->step = KiaV1EncoderStepReset;
     }
     return ret;
 }
