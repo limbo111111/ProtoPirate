@@ -82,6 +82,7 @@ void *subghz_protocol_encoder_kia_alloc(SubGhzEnvironment *environment)
 {
     UNUSED(environment);
     SubGhzProtocolEncoderKIA *instance = malloc(sizeof(SubGhzProtocolEncoderKIA));
+    memset(instance, 0, sizeof(SubGhzProtocolEncoderKIA));
     instance->base.protocol = &kia_protocol_v0;
     instance->is_running = false;
     FURI_LOG_I(TAG, "Encoder allocated at %p", instance);

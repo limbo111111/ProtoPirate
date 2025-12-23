@@ -454,6 +454,7 @@ void *kia_protocol_encoder_v5_alloc(SubGhzEnvironment *environment)
 {
     UNUSED(environment);
     SubGhzProtocolEncoderKiaV5 *instance = malloc(sizeof(SubGhzProtocolEncoderKiaV5));
+    memset(instance, 0, sizeof(SubGhzProtocolEncoderKiaV5));
     instance->base.protocol = &kia_protocol_v5;
     instance->step = KiaV5EncoderStepReset;
     return instance;
