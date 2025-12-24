@@ -168,6 +168,7 @@ void *kia_protocol_decoder_v2_alloc(SubGhzEnvironment *environment)
 {
     UNUSED(environment);
     SubGhzProtocolDecoderKiaV2 *instance = malloc(sizeof(SubGhzProtocolDecoderKiaV2));
+    memset(instance, 0, sizeof(SubGhzProtocolDecoderKiaV2));
     instance->base.protocol = &kia_protocol_v2;
     instance->generic.protocol_name = instance->base.protocol->name;
     return instance;
