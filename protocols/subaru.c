@@ -36,6 +36,7 @@ typedef enum
     SubaruEncoderStepPreamble,
     SubaruEncoderStepGap,
     SubaruEncoderStepSync,
+    SubaruEncoderStepStart,
     SubaruEncoderStepData,
     SubaruEncoderStepStop,
 } SubaruEncoderStep;
@@ -647,8 +648,8 @@ LevelDuration subghz_protocol_encoder_subaru_yield(void *context)
         instance->step = SubaruEncoderStepPreamble;
         // fallthrough
     case SubaruEncoderStepPreamble:
-        if (instance->preamble_count < 50)
-        { // 25 pairs
+        if (instance->preamble_count < 49)
+        { // Ends on HIGH
             if (instance->preamble_count % 2 == 0)
             {
                 instance->preamble_count++;
@@ -670,8 +671,12 @@ LevelDuration subghz_protocol_encoder_subaru_yield(void *context)
         return level_duration_make(false, gap_val);
 
     case SubaruEncoderStepSync:
-        instance->step = SubaruEncoderStepData;
+        instance->step = SubaruEncoderStepStart;
         return level_duration_make(true, gap_val);
+
+    case SubaruEncoderStepStart:
+        instance->step = SubaruEncoderStepData;
+        return level_duration_make(false, te_long);
 
     case SubaruEncoderStepData:
         if (instance->data_bit_index < 128)

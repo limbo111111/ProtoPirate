@@ -660,6 +660,7 @@ LevelDuration subghz_protocol_encoder_ford_v0_yield(void *context)
         {
             if (instance->preamble_count % 2 == 0)
             {
+                instance->preamble_count++;
                 return level_duration_make(true, te_long);
             }
             else
