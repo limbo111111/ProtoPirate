@@ -462,6 +462,26 @@ void kia_protocol_encoder_v1_free(void *context)
     free(instance);
 }
 
+static void kia_v1_update_data(SubGhzProtocolEncoderKiaV1 *instance)
+{
+    uint64_t data = 0;
+
+    // Serial: bits 55-24 (32 bits)
+    data |= ((uint64_t)instance->generic.serial & 0xFFFFFFFF) << 24;
+
+    // Btn: bits 23-16 (8 bits)
+    data |= ((uint64_t)instance->generic.btn & 0xFF) << 16;
+
+    // Count: bits 15-8 (8 bits)
+    data |= ((uint64_t)instance->generic.cnt & 0xFF) << 8;
+
+    // CRC: bits 7-0 (8 bits)
+    // Preserve original CRC
+    data |= (instance->generic.data & 0xFF);
+
+    instance->generic.data = data;
+}
+
 SubGhzProtocolStatus kia_protocol_encoder_v1_deserialize(void *context, FlipperFormat *flipper_format)
 {
     furi_assert(context);
@@ -471,7 +491,26 @@ SubGhzProtocolStatus kia_protocol_encoder_v1_deserialize(void *context, FlipperF
     if (subghz_block_generic_deserialize_check_count_bit(
             &instance->generic, flipper_format, kia_protocol_v1_const.min_count_bit_for_found))
     {
-        // No need to read other fields as they are part of the main 56-bit key
+        uint32_t temp_val;
+        bool fields_present = true;
+
+        if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->generic.serial, 1))
+            fields_present = false;
+
+        if (flipper_format_read_uint32(flipper_format, "Btn", &temp_val, 1))
+            instance->generic.btn = temp_val;
+        else
+            fields_present = false;
+
+        if (flipper_format_read_uint32(flipper_format, "Cnt", &temp_val, 1))
+            instance->generic.cnt = temp_val;
+        else
+            fields_present = false;
+
+        if (fields_present) {
+            kia_v1_update_data(instance);
+        }
+
         ret = SubGhzProtocolStatusOk;
     }
 
