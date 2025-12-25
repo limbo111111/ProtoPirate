@@ -410,6 +410,31 @@ void kia_protocol_encoder_v2_free(void *context)
     free(instance);
 }
 
+static void kia_v2_update_data(SubGhzProtocolEncoderKiaV2 *instance)
+{
+    uint64_t data = 0;
+
+    // Serial: 32 bits (51-20)
+    data |= ((uint64_t)instance->generic.serial & 0xFFFFFFFF) << 20;
+
+    // Button: 4 bits (19-16)
+    data |= ((uint64_t)instance->generic.btn & 0x0F) << 16;
+
+    // Counter: 12 bits (15-4)
+    // Convert generic.cnt back to raw_count format
+    // Decoder: instance->generic.cnt = ((raw_count >> 4) | (raw_count << 8)) & 0xFFF;
+    // Inverse: raw_count = ((cnt << 4) | (cnt >> 8)) & 0xFFF;
+    uint16_t raw_count = ((instance->generic.cnt << 4) | (instance->generic.cnt >> 8)) & 0xFFF;
+    data |= ((uint64_t)raw_count & 0xFFF) << 4;
+
+    // CRC: 4 bits (3-0)
+    // We preserve the original CRC from the loaded key because we don't have the algo to recalc it
+    // The previous key data is still in generic.data, so we can extract it
+    data |= (instance->generic.data & 0x0F);
+
+    instance->generic.data = data;
+}
+
 SubGhzProtocolStatus kia_protocol_encoder_v2_deserialize(void *context, FlipperFormat *flipper_format)
 {
     furi_assert(context);
@@ -419,7 +444,27 @@ SubGhzProtocolStatus kia_protocol_encoder_v2_deserialize(void *context, FlipperF
     if (subghz_block_generic_deserialize_check_count_bit(
             &instance->generic, flipper_format, kia_protocol_v2_const.min_count_bit_for_found))
     {
-        // No need to read other fields, they are derived from the key
+        uint32_t temp_val;
+        bool fields_present = true;
+
+        if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->generic.serial, 1))
+            fields_present = false;
+
+        if (flipper_format_read_uint32(flipper_format, "Btn", &temp_val, 1))
+            instance->generic.btn = temp_val;
+        else
+            fields_present = false;
+
+        if (flipper_format_read_uint32(flipper_format, "Cnt", &temp_val, 1))
+            instance->generic.cnt = temp_val;
+        else
+            fields_present = false;
+
+        // If specific fields are present, update the data to reflect them
+        if (fields_present) {
+            kia_v2_update_data(instance);
+        }
+
         ret = SubGhzProtocolStatusOk;
     }
 

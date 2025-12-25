@@ -348,6 +348,7 @@ void *subghz_protocol_encoder_suzuki_alloc(SubGhzEnvironment *environment)
 {
     UNUSED(environment);
     SubGhzProtocolEncoderSuzuki *instance = malloc(sizeof(SubGhzProtocolEncoderSuzuki));
+    memset(instance, 0, sizeof(SubGhzProtocolEncoderSuzuki));
     instance->base.protocol = &suzuki_protocol;
     instance->step = SuzukiEncoderStepReset;
     return instance;
@@ -360,6 +361,74 @@ void subghz_protocol_encoder_suzuki_free(void *context)
     free(instance);
 }
 
+static void suzuki_update_data(SubGhzProtocolEncoderSuzuki *instance)
+{
+    // Reconstruct 64-bit generic.data from fields
+    // Decoder:
+    // uint64_t data = instance->generic.data;
+    // uint32_t serial_button = ((instance->data_high & 0xFFF) << 20) | (instance->data_low >> 12);
+    // instance->generic.serial = serial_button >> 4;
+    // instance->generic.btn = serial_button & 0xF;
+    // instance->generic.cnt = (data >> 44) & 0xFFFF;
+    // Check manufacturer nibble (should be 0xF) in (data_high >> 28) & 0xF;
+
+    // We need to reverse this into generic.data
+    // generic.data layout:
+    // Bits 63-60: Manufacturer (0xF)
+    // Bits 59-44: Cnt (16 bits)
+    // Bits 43-32: Serial High (12 bits)
+    // Bits 31-12: Serial/Btn (20 bits? No, wait.)
+
+    // Let's trace bits from data_high/low to generic.data
+    // generic.data = ((uint64_t)instance->data_high << 32) | (uint64_t)instance->data_low;
+    // So generic.data bits 63..32 = data_high, 31..0 = data_low.
+
+    // Manufacturer: (data_high >> 28) & 0xF  -> generic.data[63..60]
+    // Cnt: (data >> 44) & 0xFFFF -> generic.data[59..44]
+
+    // Serial/Btn decoding:
+    // serial_button = ((data_high & 0xFFF) << 20) | (data_low >> 12);
+    // data_high & 0xFFF corresponds to generic.data[43..32]
+    // data_low >> 12 corresponds to generic.data[31..12]
+    // serial_button = generic.data[43..12] (32 bits)
+
+    // Serial = serial_button >> 4 -> generic.data[43..16] (28 bits)
+    // Btn = serial_button & 0xF -> generic.data[15..12] (4 bits)
+
+    // CRC: (data >> 4) & 0xFF -> generic.data[11..4]
+    // Low nibble (3..0) seems unused or part of something else?
+    // Wait, let's check `suzuki_add_bit`. It just shifts in.
+    // If CRC is `(data >> 4) & 0xFF`, it's bits 11..4.
+    // The lowest 4 bits (3..0) seem to be ignored by the decoder extraction logic?
+    // "instance->data_low" is 32 bits. "data_low >> 12" uses bits 31..12.
+    // So bits 11..0 of data_low (generic.data[11..0]) are not used in Serial/Btn.
+    // CRC extraction uses `(data >> 4) & 0xFF`. So generic.data[11..4].
+    // What about bits 3..0?
+    // They are just kept as is.
+
+    uint64_t data = 0;
+
+    // Manufacturer (0xF) at 63..60
+    data |= (0xFULL << 60);
+
+    // Cnt at 59..44 (16 bits)
+    data |= ((uint64_t)instance->generic.cnt & 0xFFFF) << 44;
+
+    // Serial at 43..16 (28 bits)
+    data |= ((uint64_t)instance->generic.serial & 0xFFFFFFF) << 16;
+
+    // Btn at 15..12 (4 bits)
+    data |= ((uint64_t)instance->generic.btn & 0xF) << 12;
+
+    // CRC at 11..4 (8 bits) - Preserve from old data
+    data |= (instance->generic.data & 0xFF0);
+
+    // Bits 3..0 - Preserve from old data
+    data |= (instance->generic.data & 0xF);
+
+    instance->generic.data = data;
+}
+
 SubGhzProtocolStatus subghz_protocol_encoder_suzuki_deserialize(void *context, FlipperFormat *flipper_format)
 {
     furi_assert(context);
@@ -370,6 +439,30 @@ SubGhzProtocolStatus subghz_protocol_encoder_suzuki_deserialize(void *context, F
     {
         ret = SubGhzProtocolStatusError;
     }
+
+    if (ret == SubGhzProtocolStatusOk)
+    {
+        uint32_t temp_val;
+        bool fields_present = true;
+
+        if (!flipper_format_read_uint32(flipper_format, "Serial", &instance->generic.serial, 1))
+            fields_present = false;
+
+        if (flipper_format_read_uint32(flipper_format, "Btn", &temp_val, 1))
+            instance->generic.btn = temp_val;
+        else
+            fields_present = false;
+
+        if (flipper_format_read_uint32(flipper_format, "Cnt", &temp_val, 1))
+            instance->generic.cnt = temp_val;
+        else
+            fields_present = false;
+
+        if (fields_present) {
+            suzuki_update_data(instance);
+        }
+    }
+
     return ret;
 }
 
