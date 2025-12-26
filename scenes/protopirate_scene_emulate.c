@@ -467,12 +467,41 @@ bool protopirate_scene_emulate_on_event(void *context, SceneManagerEvent event)
                 FURI_LOG_I(TAG, "Using frequency %lu Hz, preset %s", frequency, preset_name);
                 
                 // Get preset data
-                uint8_t* preset_data = subghz_setting_get_preset_data_by_name(app->setting, preset_name);
+                uint8_t* preset_data = NULL;
+                uint8_t custom_preset_data[32] = {0};
+
+                if(furi_string_cmp_str(preset_str, "FuriHalSubGhzPresetCustom") == 0) {
+                    // Handle custom preset by reading hex data
+                    flipper_format_rewind(emulate_context->flipper_format);
+                    FuriString* custom_data_str = furi_string_alloc();
+                    if(flipper_format_read_string(emulate_context->flipper_format, "Custom_Preset_Data", custom_data_str)) {
+                        // Parse hex string to bytes
+                        const char* hex_str = furi_string_get_cstr(custom_data_str);
+                        size_t len = strlen(hex_str);
+                        if(len > 64) len = 64; // Max 32 bytes
+
+                        for(size_t i = 0; i < len; i += 2) {
+                            char byte_str[3] = {hex_str[i], hex_str[i+1], '\0'};
+                            custom_preset_data[i/2] = (uint8_t)strtol(byte_str, NULL, 16);
+                        }
+                        preset_data = custom_preset_data;
+                        FURI_LOG_I(TAG, "Loaded custom preset data");
+                    } else {
+                        FURI_LOG_E(TAG, "Failed to read Custom_Preset_Data");
+                    }
+                    furi_string_free(custom_data_str);
+                } else {
+                    // Look up named preset
+                    preset_data = subghz_setting_get_preset_data_by_name(app->setting, preset_name);
+                }
                 
+                // Fallbacks if preset not found
                 if (!preset_data) {
+                    FURI_LOG_W(TAG, "Preset data not found, falling back to FM476");
                     preset_data = subghz_setting_get_preset_data_by_name(app->setting, "FM476");
                 }
                 if (!preset_data) {
+                    FURI_LOG_W(TAG, "FM476 not found, falling back to AM650");
                     preset_data = subghz_setting_get_preset_data_by_name(app->setting, "AM650");
                 }
                 
