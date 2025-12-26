@@ -495,16 +495,6 @@ bool protopirate_scene_emulate_on_event(void *context, SceneManagerEvent event)
                         notification_message(app->notifications, &sequence_blink_start_cyan);
                         notification_message(app->notifications, &sequence_single_vibro);
                         FURI_LOG_I(TAG, "Started transmission: freq=%lu, preset=%s", frequency, preset_name);
-                        
-                        furi_delay_ms(100);
-                        
-                        // Stop transmission
-                        subghz_devices_stop_async_tx(app->txrx->radio_device);
-                        subghz_devices_idle(app->txrx->radio_device);
-                        app->txrx->txrx_state = ProtoPirateTxRxStateIDLE;
-                        notification_message(app->notifications, &sequence_blink_stop);
-                        
-                        FURI_LOG_I(TAG, "Transmission complete");
                     } else {
                         FURI_LOG_E(TAG, "Failed to start async TX");
                         notification_message(app->notifications, &sequence_error);
